@@ -1,0 +1,12 @@
+*.o
+*.out
+*.dec
+*.enc
+sltrsa
+sltrsa_forprof
+sltrsa_keygen
+keygen_forprof
+*profile
+tests/
+test.txt
+printPrime*

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
+#include <future>
 #include <cassert>
 
 constexpr unsigned PrimeBits = 1024;
@@ -46,21 +47,11 @@ int main(int argc, char** argv)
 		std::exit(1);
 	}
 //	auto p = primeGen().extend();
+	auto fut1 = std::async([](){ return primeGen().extend(); });
+	auto fut2 = std::async([](){ return primeGen().extend(); });
 	BigUInt<2 * PrimeBits> p, q;
-	std::thread thrd1{
-		[&p]() {
-			p = primeGen().extend();
-			puts("key1 generated");
-		}
-	};
-	std::thread thrd2{
-		[&q]() {
-			q = primeGen().extend();
-			puts("key2 generated");
-		}
-	};
-	thrd1.join();
-	thrd2.join();
+	p = std::move(fut1.get()); std::puts("key1 generated");
+	q = std::move(fut2.get()); std::puts("key2 generated");
 	
 	
 	auto n = p * q;

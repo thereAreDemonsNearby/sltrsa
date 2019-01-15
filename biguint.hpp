@@ -55,9 +55,9 @@ public:
     self operator>> (std::size_t off);
     self& operator>>= (std::size_t off);
     
-    // modifier
+
     self divide(const self& rhs); // do divide in-place.
-    //returns the remainer
+    //returns the remainder
     
     BigUInt& flip() {
 		for (auto& u : data_) {

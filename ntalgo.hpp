@@ -5,6 +5,8 @@
 #include <iterator>
 #include <random>
 #include <tuple>
+#include <thread>
+#include <atomic>
 #include "biguint.hpp"
 
 template<typename T>
@@ -292,11 +294,74 @@ template<typename Integer>
 bool millerRabin(const Integer& n, int times)
 {
     for (int i = 1; i <= times; ++i) {
-	auto a = Random<Integer>()(1, n-1);
-	if (millerRabin_witness(a, n))
-	    return true;
+    	auto a = Random<Integer>()(1, n-1);
+    	if (millerRabin_witness(a, n))
+    	    return true;
     }
     return false;
+}
+
+template<typename Integer>
+bool millerRabin2(const Integer& n, int times)
+{
+    std::atomic_bool composite(false);
+    auto thrdFunc = [&composite, &n]() {
+			for (int i = 1; i < 5; ++i) {
+			    if (composite == true) {
+				return;
+			    }
+			    auto a = Random<Integer>()(1, n-1);
+			    if (millerRabin_witness(a, n)) {
+				composite = true;
+				return;
+			    }
+			} 
+		    };
+
+    std::thread threads[4];
+    for (auto& thrd : threads) {
+	thrd = std::thread(thrdFunc);
+    }
+
+    for (auto& thrd : threads) {
+	thrd.join();
+    }
+
+    return composite;
+}
+
+template<typename Integer>
+bool millerRabin3(const Integer& n, int times)
+{
+    auto a = Random<Integer>()(1, n-1);
+    if (millerRabin_witness(a, n))
+	return true;
+    
+    std::atomic_bool composite(false);
+    auto thrdFunc = [&composite, &n](int loop) {
+			for (int i = 0; i < loop; ++i) {
+			    if (composite == true) {
+				return;
+			    }
+			    auto a = Random<Integer>()(1, n-1);
+			    if (millerRabin_witness(a, n)) {
+				composite = true;
+				return;
+			    }
+			}
+		    };
+
+    std::thread threads[4];
+    for (size_t i = 0; i != 3; ++i) {
+	threads[i] = std::thread(thrdFunc, 5);
+    }
+    threads[3] = std::thread(thrdFunc, 4);
+
+    for (auto& thrd : threads) {
+	thrd.join();
+    }
+
+    return composite;
 }
 
 #endif // NTALGO_HPP_

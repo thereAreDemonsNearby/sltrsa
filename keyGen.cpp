@@ -1,10 +1,13 @@
-#include "smallprimes.h"
-#include "ntalgo.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
 #include <future>
 #include <cassert>
+#include <string>
+
+#include "smallprimes.h"
+#include "ntalgo.hpp"
+#include "TimerGuard.h"
 
 constexpr unsigned PrimeBits = 1024;
 const BigUInt<2*PrimeBits> e {65537};
@@ -49,11 +52,17 @@ int main(int argc, char** argv)
 
     bool done = false;
     while (not done) {
-	auto fut1 = std::async([](){ return primeGen().extend(); });
-	auto fut2 = std::async([](){ return primeGen().extend(); });
 	BigUInt<2 * PrimeBits> p, q;
-	p = std::move(fut1.get()); std::puts("key1 generated");
-	q = std::move(fut2.get()); std::puts("key2 generated");
+
+	{
+	    TimerGuard tg("Time used for gen key1: ");
+	    p = primeGen().extend();
+	}
+
+	{
+	    TimerGuard tg("Time used for gen key2: ");
+	    q = primeGen().extend();
+	}
 	
 	
 	auto n = p * q;
@@ -94,7 +103,7 @@ int main(int argc, char** argv)
 
 bool preTest(const BigUInt<PrimeBits>& n)
 {
-    for (int i = 0; i < 2000; ++i) {
+    for (int i = 0; i < 10000; ++i) {
 	auto copy = n;
 	if (copy.divideU32(smallPrimes[i]) == 0) {
 	    return false;
@@ -109,7 +118,7 @@ bool primeTest(const BigUInt<PrimeBits>& n)
     if (!preTest(n))
 	return false;
 
-    return !millerRabin(n, 10);
+    return !millerRabin3(n, 20);
 }
 
 BigUInt<PrimeBits> primeGen()

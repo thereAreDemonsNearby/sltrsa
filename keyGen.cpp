@@ -1,134 +1,86 @@
-#include <cstdio>
+#include <fmt/format.h>
 #include <cstdlib>
 #include <thread>
 #include <future>
 #include <cassert>
 #include <string>
 
-#include "smallprimes.h"
 #include "ntalgo.hpp"
 #include "TimerGuard.h"
+#include "primegen.hpp"
 
-constexpr unsigned PrimeBits = 1024;
+constexpr size_t PrimeBits = 1024;
 const BigUInt<2*PrimeBits> e {65537};
 
-BigUInt<PrimeBits> primeGen();
-bool primeTest(const BigUInt<PrimeBits>&);
-bool preTest(const BigUInt<PrimeBits>&);
-
-template<std::size_t B>
-BigUInt<B> signedMod(BigUInt<B> a, BigUInt<B> const& n)
-{
-    if (a.negative()) {
-	do {
-	    a += n;
-	} while (a.negative());
-    } else {
-	a %= n;
-    }
-    return a;
-}
-
-static const BigUInt<PrimeBits>& halfBits()
-{
-    static bool created = false;
-    static BigUInt<PrimeBits> ret;
-    if (!created) {
-	created = true;
-	for (int i = 0; i < ret.data().size() / 2; ++i) {
-	    ret.data()[i] = UINT32_MAX;
-	}
-    }
-
-    return ret;
-}
+template<typename... BIGUINTS>
+int writeBigUInt(std::FILE* fp, BIGUINTS&&... args);
 
 int main(int argc, char** argv)
 {
-    if (argc != 3) {
-	fprintf(stderr, "usage: %s <pubkey> <privkey>\n", argv[0]);
+    using namespace fmt::literals;
+    int threadNum = 4;
+    
+    if (argc != 3) {	
+	fmt::print(stderr, "usage: {} <public key> <private key>\n", argv[0]);
 	std::exit(1);
     }
 
     bool done = false;
     while (not done) {
-	BigUInt<2 * PrimeBits> p, q;
+	BigUInt<PrimeBits> p, q;
 
 	{
-	    TimerGuard tg("Time used for gen key1: ");
-	    p = primeGen().extend();
+	    TimerGuard tg("Time used for gen prime 1: ");
+	    p = primeGen_par<PrimeBits>(threadNum);
 	}
 
 	{
-	    TimerGuard tg("Time used for gen key2: ");
-	    q = primeGen().extend();
+	    TimerGuard tg("Time used for gen prime 2: ");
+	    q = primeGen_par<PrimeBits>(threadNum);
 	}
 	
 	
-	auto n = p * q;
-	auto phiN = (p - 1) * (q - 1);
-	auto tup = exgcd(e, phiN);
-//	assert(std::get<0>(tup) == 1);
-	if (std::get<0>(tup) != 1) {
+	auto n = fullMultiply(p, q);
+	auto phiN = fullMultiply(p - 1, q - 1);
+	BigUInt<PrimeBits * 2> d;
+	if (!modInverse(e, phiN, d)) {
 	    std::puts("Bad luck; regenerating...");
 	    continue;
 	}
 	else
 	    done = true;
-	auto d = signedMod(std::get<1>(tup), phiN); // e^(-1) mod n = s mod n
+	BigUInt<PrimeBits> pInv, qInv;
+	modInverse(p, q, pInv);
+	modInverse(q, p, qInv);
 
 	std::FILE* pubk;
 	std::FILE* prik;
 
 	if ((pubk = std::fopen(argv[1], "wb")) == NULL) {
-	    std::perror("cannot create publickey");
+	    std::string msg = "cannot create public key file {}"_format(argv[1]);
+	    std::perror(msg.c_str());
 	    std::exit(1);
 	}
 
 	if ((prik = std::fopen(argv[2], "wb")) == NULL) {
-	    std::perror("cannot create privatekey");
+	    std::string msg = "cannot create private key file {}"_format(argv[2]);
+	    std::perror(msg.c_str());
 	    std::exit(2);
 	}
 
-	// TODO error handling
-	std::fwrite(e.data().data(), sizeof(uint32_t), e.data().size(), pubk);
-	std::fwrite(n.data().data(), sizeof(uint32_t), n.data().size(), pubk);
-	std::fwrite(d.data().data(), sizeof(uint32_t), d.data().size(), prik);
-	std::fwrite(n.data().data(), sizeof(uint32_t), n.data().size(), prik);
+	// public key: e n
+	writeBigUInt(pubk, e, n);
+
+	// private key: d n p q pInv qInv
+	writeBigUInt(prik, d, n, p, q, pInv, qInv);
 
 	std::fclose(pubk);
 	std::fclose(prik);
     }
 }
 
-bool preTest(const BigUInt<PrimeBits>& n)
+template<typename... BIGUINTS>
+int writeBigUInt(std::FILE* fp, BIGUINTS&&... args)
 {
-    for (int i = 0; i < 10000; ++i) {
-	auto copy = n;
-	if (copy.divideU32(smallPrimes[i]) == 0) {
-	    return false;
-	}
-    }
-
-    return true;
-}
-
-bool primeTest(const BigUInt<PrimeBits>& n)
-{
-    if (!preTest(n))
-	return false;
-
-    return !millerRabin3(n, 20);
-}
-
-BigUInt<PrimeBits> primeGen()
-{
-    auto r = BigUInt<PrimeBits>::randomGenOdd();
-    while (r < halfBits()) {
-	r = BigUInt<PrimeBits>::randomGenOdd();
-    }
-    while (!primeTest(r)) {
-	r += 2;
-    }
-    return r;
+    return (std::fwrite(args.data().data(), sizeof(uint32_t), args.data().size(), fp), ...);
 }

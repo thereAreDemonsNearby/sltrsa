@@ -62,13 +62,15 @@ private:
 	: nump(p), index(ind), offset(off) {}
 public:
     BitIterator(const BigUInt<B>& p, int off = 0)
-	: nump(&p), index(off / 32), offset(off % 32) {}   
+	: nump(&p), index(off / 32), offset(off % 32) {}
+    
     bool operator==(const BitIterator& rhs) {
 	return (index <= -1 && rhs.index <= -1)
 	    || (index >= B/32 && rhs.index >= B/32)
 	    || (nump == rhs.nump && index == rhs.index
 		&& offset == rhs.offset);			
     }
+    
     bool operator!= (const BitIterator& rhs) { return !(operator==(rhs)); }
 
     bool operator*() {
@@ -218,7 +220,7 @@ BigUInt<B> modularExp(const BigUInt<B>& a, const BigUInt<B>& b, const BigUInt<B>
     BigUInt<ExB> d{1};
     BigUInt<ExB> exA = a.extend();
     BigUInt<ExB> exN = n.extend();
-    BitIterator<typename std::decay<decltype(b)>::type>
+    BitIterator<BigUInt<B>>
 	bIter{b, Width<BigUInt<B>>()() - 1};
     auto end = BitIterator<typename std::decay<decltype(b)>::type>::beforeBegin();
     while (bIter != end) {
@@ -291,9 +293,9 @@ bool millerRabin_witness(const BigUInt<B>& a,const BigUInt<B>& n)
 
 // return true if n is composite
 template<typename Integer>
-bool millerRabin(const Integer& n, int times)
+bool millerRabin(const Integer& n)
 {
-    for (int i = 1; i <= times; ++i) {
+    for (int i = 1; i <= 50; ++i) {
     	auto a = Random<Integer>()(1, n-1);
     	if (millerRabin_witness(a, n))
     	    return true;
@@ -331,7 +333,7 @@ bool millerRabin2(const Integer& n, int times)
 }
 
 template<typename Integer>
-bool millerRabin3(const Integer& n, int times)
+bool millerRabin_par(const Integer& n, int threadNum)
 {
     auto a = Random<Integer>()(1, n-1);
     if (millerRabin_witness(a, n))
@@ -351,17 +353,48 @@ bool millerRabin3(const Integer& n, int times)
 			}
 		    };
 
-    std::thread threads[4];
-    for (size_t i = 0; i != 3; ++i) {
-	threads[i] = std::thread(thrdFunc, 5);
+    std::vector<std::thread> threads(threadNum);
+    int tasksPerThread = 19 / threadNum;
+    int remainedTasks = 19 % threadNum;
+    
+    for (auto& thrd : threads) {
+	thrd = std::thread(thrdFunc, tasksPerThread);
     }
-    threads[3] = std::thread(thrdFunc, 4);
-
+    if (remainedTasks > 0) {
+	std::thread(thrdFunc, remainedTasks).join();
+    }
     for (auto& thrd : threads) {
 	thrd.join();
     }
 
     return composite;
+}
+
+template<size_t B>
+BigUInt<B> signedMod(BigUInt<B> a, BigUInt<B> const& n)
+{
+    if (a.negative()) {
+	do {
+	    a += n;
+	} while (a.negative());
+    } else {
+	a %= n;
+    }
+    return a;
+}
+
+template<size_t Bits>
+bool modInverse(BigUInt<Bits> const& a, BigUInt<Bits> const& n, BigUInt<Bits>& result)
+{
+    auto tup = exgcd(a.template resize<2*Bits>(), n.template resize<2*Bits>());
+    if (std::get<0>(tup) != 1) {
+	return false;
+    }
+
+    result = signedMod(std::move(std::get<1>(tup)),
+		       n.template resize<2*Bits>())
+	.template resize<Bits>();
+    return true;
 }
 
 #endif // NTALGO_HPP_

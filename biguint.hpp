@@ -11,17 +11,36 @@
 #include <type_traits>
 
 template<std::size_t BITS_>
+class BigUInt;
+
+template <std::size_t B>
+BigUInt<2 * B> fullMultiply(BigUInt<B> const& lhs, BigUInt<B> const& rhs);
+
+template<std::size_t BITS_>
 class BigUInt
 {
     typedef std::true_type has_divide;
     static const std::size_t BITS = BITS_;
     static_assert(BITS % 32 == 0, "not beishu of 32!");
-    static constexpr std::size_t VLEN = (BITS + 31) / 32;
+    static constexpr std::size_t VLEN = BITS / 32;
     using self = BigUInt;
 	
     friend class BigUInt<BITS_ *2>;
     friend class BigUInt<BITS_ /2>;
+    
+    friend
+    BigUInt<2 * BITS_> fullMultiply<BITS_>(self const& lhs, self const& rhs);
+    
 public:
+    static self fromDec(const std::string& decString) {
+	self result;
+	for (auto it = decString.begin(); it != decString.end(); ++it) {
+	    result *= 10;
+	    result += *it - '0';
+	}
+	return result;
+    }
+    
     BigUInt() : data_( VLEN, 0 ) {}
     BigUInt(uint64_t n) : BigUInt() {
 	data_[0] = n;
@@ -115,6 +134,16 @@ public:
 	return res;
     }
 
+    template<size_t MoreOrLessBits>
+    BigUInt<MoreOrLessBits> resize() const {      
+	BigUInt<MoreOrLessBits> res{0};
+	constexpr size_t less = std::min(BITS_, MoreOrLessBits);
+	for (int i = 0; i < less / 32; ++i) {
+	    res.data_[i] = data_[i];
+	}
+	return res;
+    }
+
     BigUInt<BITS_ / 2> trunc() const {
 	BigUInt<BITS_ / 2> res;
 	for (int i = 0; i < res.data().size(); ++i) {
@@ -130,6 +159,7 @@ public:
     std::vector<uint32_t>& data() {
 	return data_;
     }
+    
     const std::vector<uint32_t>& data() const {
 	return data_;
     }
@@ -158,6 +188,21 @@ public:
 
     static self randomGenOdd() {
 	self ret = randomGen();
+	if (ret.data_[0] % 2 == 0) {
+	    ret.data_[0] += 1;
+	}
+	return ret;
+    }
+
+    static self randomGenFullBitsOdd() {
+	self ret;
+	std::random_device dev;
+	std::uniform_int_distribution<uint32_t> highestByteDist(static_cast<uint32_t>(INT32_MIN), UINT32_MAX);
+	std::uniform_int_distribution<uint32_t> dist(0, UINT32_MAX);
+	for (size_t i = 0; i < VLEN - 1; ++i) {
+	    ret.data_[i] = dist(dev);
+	}
+	ret.data_[VLEN - 1] = highestByteDist(dev);
 	if (ret.data_[0] % 2 == 0) {
 	    ret.data_[0] += 1;
 	}
@@ -493,6 +538,32 @@ std::string BigUInt<B>::toDec() const
     std::reverse(result.begin(), result.end());
     
     return result;
+}
+
+template <std::size_t B>
+BigUInt<2 * B> fullMultiply(BigUInt<B> const& lhs, BigUInt<B> const& rhs)
+{
+    BigUInt<2 * B> result = 0;
+    uint64_t carry;
+    for (size_t i = 0; i < BigUInt<B>::VLEN; ++i) {
+	carry = 0;
+	for (size_t j = 0; j < BigUInt<B>::VLEN; ++j) {
+	    uint64_t tmp = static_cast<uint64_t>(lhs.data()[j]) * rhs.data()[i]
+		+ carry + result.data()[i + j];
+	    result.data()[i + j] = (tmp & BigUInt<B>::mask_);
+	    carry = tmp / 0x10000 / 0x10000; // mod 2^32
+	}
+	result.data()[i + BigUInt<B>::VLEN] = carry;
+    }
+
+    return result;
+}
+
+template <std::size_t BitsMore, std::size_t BitsLess>
+BigUInt<BitsLess> modLess(BigUInt<BitsMore> const& lhs, BigUInt<BitsLess> const& rhs)
+{
+    static_assert(BitsMore >= BitsLess);
+    return (lhs % rhs.template resize<BitsMore>()).template resize<BitsLess>();
 }
 
 

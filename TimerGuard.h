@@ -1,22 +1,23 @@
 #ifndef TIMERGUARD_H__
 #define TIMERGUARD_H__
-#include <cstdio>
+#include <iostream>
 #include <chrono>
 
 class TimerGuard
 {
 public:
-    TimerGuard(std::string d)
+    TimerGuard(std::string d, std::ostream& os = std::cout)
 	: start_(std::chrono::system_clock::now()),
-	  description_(d) {}
+	  description_(d), os_(os) {}
     ~TimerGuard() {
 	auto end = std::chrono::system_clock::now();
-	std::chrono::duration<double> du = end - start_;
-	std::printf("%s %f\n", description_.c_str(), du.count());
+	std::chrono::duration<double> du = end - start_;	
+	os_ << description_ << ' ' << du.count() << std::endl;
     }
 private:
     std::chrono::system_clock::time_point start_;
     std::string description_;
+    std::ostream& os_;
 };
 
 #endif

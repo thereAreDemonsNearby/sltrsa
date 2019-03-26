@@ -29,7 +29,7 @@ BigUInt<CipherChunkBits> decryptUsingChineseRemainderTheorem_par(
 int main(int argc, char* argv[])
 {
     if (argc != 5) {
-	fmt::print(stderr, "usage: {}2.0 [-e/-d] <key> <file> <result>\n", argv[0]);
+	fmt::print(stderr, "usage: {}3.0 [-e/-d] <key> <file> <result>\n", argv[0]);
 	std::exit(1);
     }
     const char* keyfile = argv[2];
@@ -81,7 +81,7 @@ void encrypt(const char* src, const char* dst, const char* keyFile)
 	    }
 	}
 
-	auto encrypted = modularExp(plainBuff, e, n);
+	auto encrypted = modularExp_montgomery(plainBuff, e, n);
 	if (std::fwrite(encrypted.data().data(), 1, CipherUnitBytes, fpdst) != CipherUnitBytes) {
 	    std::fprintf(stderr, "fwrite error\n");
 	    std::exit(2);
@@ -196,12 +196,12 @@ BigUInt<CipherChunkBits> decryptUsingChineseRemainderTheorem_par(
 	fut1 = std::async([&](){
 			      auto cipher1 = modLess(cipher, p);
 			      auto d1 = modLess(d, p - 1);
-			      return modularExp(cipher1, d1, p);
+			      return modularExp_montgomery(cipher1, d1, p);
 			  }),
 	fut2 = std::async([&](){
 			      auto cipher2 = modLess(cipher, q);
 			      auto d2 = modLess(d, q - 1);
-			      return modularExp(cipher2, d2, q);			  
+			      return modularExp_montgomery(cipher2, d2, q);
 			  });
 
     auto m1 = fut1.get();

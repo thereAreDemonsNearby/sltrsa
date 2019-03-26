@@ -8,6 +8,7 @@
 #include <thread>
 #include <atomic>
 #include "biguint.hpp"
+#include "TimerGuard.h"
 
 template<typename T>
 struct hasDivide
@@ -196,23 +197,6 @@ bool modularLinearEquation(Integer* result, const Integer& a, const Integer& b, 
     return true;
 }
 
-// a ^ b mod n
-// template<typename Integer>
-// Integer modularExp(const Integer& a, const Integer& b, const Integer& n)
-// {
-// 	Integer d{1};
-// 	BitIterator<Integer> bIter{b, Width<Integer>()() - 1};
-// 	auto end = BitIterator<Integer>::beforeBegin();
-// 	while (bIter != end) {
-// 		d = (d * d) % n;
-// 		if (*bIter) { // bi == 1
-// 			d = (d * a) % n;
-// 		}
-// 		--bIter;
-// 	}
-// 	return d;
-// }
-
 template<std::size_t B>
 BigUInt<B> modularExp(const BigUInt<B>& a, const BigUInt<B>& b, const BigUInt<B>& n)
 {
@@ -223,6 +207,10 @@ BigUInt<B> modularExp(const BigUInt<B>& a, const BigUInt<B>& b, const BigUInt<B>
     BitIterator<BigUInt<B>>
 	bIter{b, Width<BigUInt<B>>()() - 1};
     auto end = BitIterator<typename std::decay<decltype(b)>::type>::beforeBegin();
+    while (!(*bIter)) {
+	--bIter;
+    }
+    
     while (bIter != end) {
 	d = (d * d) % exN;
 	if (*bIter) {
@@ -233,37 +221,87 @@ BigUInt<B> modularExp(const BigUInt<B>& a, const BigUInt<B>& b, const BigUInt<B>
     return d.trunc();
 }
 
-// use a to test if n is prime
-// return true if n is composite. a^(n-1) = 1(mod n)
-// template<typename Integer>
-// bool millerRabin_witness(const Integer& a, const Integer& n)
-// {
-// 	Integer one{1};
-// 	Integer m = n - one;
-// 	int t = 0;
-// 	BitIterator<Integer> iter{m, 0};
-// 	BitIterator<Integer> end = BitIterator<Integer>::end();
-// 	while (iter != end && !(*iter)) {
-// 		++t;
-// 		++iter;
-// 	}		
-// 	Integer u = m >> t;
-// 	Integer x0 = modularExp(a, u, n);
-// 	for (int i = 1; i <= t; ++i) {
-// 		auto x1 = (x0 * x0) % n;
-// 		if (x1 == one && (x0 != one && x0 != m)) {
-// 			return true;
-// 		}
-// 		x0 = x1;
-// 	}
-// 	if (x0 != one) {
-// 		return true;
-// 	}
-// 	return false;
-// }
+template <std::size_t B>
+std::tuple<BigUInt<B>, BigUInt<B>, BigUInt<B>>
+findR(BigUInt<B> const& modulusExtended)
+{
+    // one more word
+    BigUInt<B> r{};    
+    r.data().back() = 1;
+    auto [gcdval, x, y] = exgcd(modulusExtended, r);
+    if (gcdval != 1) {
+	// fmt::print("Fuck\n");
+	throw 0;
+    } else {
+	// now we have y * r + x * modulus = 1
+	x = signedMod(-x, r);
+	y = signedMod(y, modulusExtended);
+	return {r, x, y};
+    }
+}
+
+template <std::size_t B1, std::size_t B2>
+BigUInt<B2 - 32> modPowerOf2(BigUInt<B1> const& v, BigUInt<B2> const& powerOf2)
+{
+    static_assert(B1 >= B2);
+    assert(powerOf2.data().back() == 1);
+    BigUInt<B2 - 32> ret{};
+    for (std::size_t i = 0; i < BigUInt<B2 - 32>::VLEN; ++i) {
+	ret.data()[i] = v.data()[i];
+    }
+    return ret;
+}
+
+// v is the value to be processed
+// modulus * x = -1(modR)
+template <std::size_t B>
+BigUInt<B> REDC(BigUInt<2*B> const& v, BigUInt<B+32> const& r,
+		BigUInt<B+32> const& modulusExtended,
+		BigUInt<B+32> const& x)
+{
+    BigUInt<B> m = modPowerOf2(fullMultiply(modPowerOf2(v, r), x), r);
+    auto t = ((v.template resize<2*B+32>()
+		+ fullMultiply(m, modulusExtended))
+	      >> B).template resize<B+32>();
+    
+    
+    if (t >= modulusExtended) {
+	return (t - modulusExtended).template resize<B>();
+    } else {
+	return t.template resize<B>();
+    }
+}
+
+template <std::size_t B>
+BigUInt<B> modularExp_montgomery(BigUInt<B> const& base, BigUInt<B> const& exp,
+				 BigUInt<B> const& modulus)
+{
+    // the highest bit of modulus is 1, which means modulus has exactly B bits.
+
+    // r, x and y are BigUInt<B+32>
+    // r*y - modulus*x == 1
+    auto modulusExt = modulus.template resize<B+32>();
+    auto [r, x, y] = findR(modulusExt);
+    BigUInt<B> baseMF = modLess(fullMultiply(base, r), modulus); // montgomery form of base
+    BigUInt<B> dMF = modLess(r, modulus); // d is 1, whose mf is 1 * r mod N
+    BitIterator<BigUInt<B>> bIter{exp, BigUInt<B>::BITS - 1};
+    auto end = BitIterator<BigUInt<B>>::beforeBegin();
+    while (!(*bIter)) {
+    	--bIter;
+    }
+    while (bIter != end) {
+	dMF = REDC<B>(fullMultiply(dMF, dMF), r, modulusExt, x);
+	if (*bIter) {
+	    dMF = REDC<B>(fullMultiply(dMF, baseMF), r, modulusExt, x);
+	}
+	--bIter;
+    }
+
+    return REDC<B>(dMF.template resize<2*B>(), r, modulusExt, x);
+}
 
 template<std::size_t B>
-bool millerRabin_witness(const BigUInt<B>& a,const BigUInt<B>& n)
+bool millerRabin_witness(const BigUInt<B>& a, const BigUInt<B>& n)
 {
     BigUInt<B> m = n - 1;
     int t = 0;
@@ -274,10 +312,11 @@ bool millerRabin_witness(const BigUInt<B>& a,const BigUInt<B>& n)
 	++iter;
     }
     BigUInt<B> u = m >> t;
-    BigUInt<2*B> x0 = modularExp(a, u, n).extend();
+    BigUInt<2*B> x0 = modularExp_montgomery(a, u, n).extend();
     BigUInt<2*B> exN = n.extend();
     BigUInt<2*B> one{ 1 };
     BigUInt<2*B> exM = m.extend();
+
     for (int i = 1; i <= t; ++i) {
 	auto x1 = (x0 * x0) % exN;
 	if (x1 == one && (x0 != one && x0 != exM)) {
@@ -386,15 +425,17 @@ BigUInt<B> signedMod(BigUInt<B> a, BigUInt<B> const& n)
 template<size_t Bits>
 bool modInverse(BigUInt<Bits> const& a, BigUInt<Bits> const& n, BigUInt<Bits>& result)
 {
-    auto tup = exgcd(a.template resize<2*Bits>(), n.template resize<2*Bits>());
+    auto tup = exgcd(a.template resize<Bits+32>(), n.template resize<Bits+32>());
     if (std::get<0>(tup) != 1) {
 	return false;
     }
 
     result = signedMod(std::move(std::get<1>(tup)),
-		       n.template resize<2*Bits>())
+		       n.template resize<Bits+32>())
 	.template resize<Bits>();
     return true;
 }
+
+
 
 #endif // NTALGO_HPP_

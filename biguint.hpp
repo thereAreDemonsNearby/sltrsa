@@ -1,6 +1,6 @@
 #ifndef BIGUINT_H_
 #define BIGUINT_H_
-
+#include <array>
 #include <vector>
 #include <cinttypes>
 #include <string>
@@ -13,25 +13,21 @@
 template<std::size_t BITS_>
 class BigUInt;
 
-template <std::size_t B>
-BigUInt<2 * B> fullMultiply(BigUInt<B> const& lhs, BigUInt<B> const& rhs);
-
 template<std::size_t BITS_>
 class BigUInt
 {
     typedef std::true_type has_divide;
-    static const std::size_t BITS = BITS_;
-    static_assert(BITS % 32 == 0, "not beishu of 32!");
-    static constexpr std::size_t VLEN = BITS / 32;
+
+    static_assert(BITS_ % 32 == 0, "not beishu of 32!");
     using self = BigUInt;
 	
     friend class BigUInt<BITS_ *2>;
-    friend class BigUInt<BITS_ /2>;
-    
-    friend
-    BigUInt<2 * BITS_> fullMultiply<BITS_>(self const& lhs, self const& rhs);
+    friend class BigUInt<BITS_ /2>;  
     
 public:
+    static constexpr std::size_t VLEN = BITS_ / 32;
+    static const std::size_t BITS = BITS_;
+    
     static self fromDec(const std::string& decString) {
 	self result;
 	for (auto it = decString.begin(); it != decString.end(); ++it) {
@@ -61,6 +57,7 @@ public:
     self operator+(const self& rhs) const;
     self& operator+= (const self& rhs);
     self operator-(const self& rhs) const;
+    self operator-() const { auto a = *this; a.flip(); return a + 1; }
     self& operator-= (const self& rhs);
     self operator*(const self& rhs) const;
     self& operator*= (const self& rhs);
@@ -139,7 +136,7 @@ public:
 	BigUInt<MoreOrLessBits> res{0};
 	constexpr size_t less = std::min(BITS_, MoreOrLessBits);
 	for (int i = 0; i < less / 32; ++i) {
-	    res.data_[i] = data_[i];
+	    res.data()[i] = data_[i];
 	}
 	return res;
     }
@@ -213,11 +210,11 @@ public:
 	uint32_t highest = data_[VLEN-1];
 	return highest & 0x80000000;
     }
-    
+
+    static const uint64_t mask_ = 0xffffffff;
 private:
     std::vector<uint32_t> data_;
     
-    static const uint64_t mask_ = 0xffffffff;
     static const std::size_t SLEN = 32;
 
     void set_LtoH(std::size_t pos, bool bit) {
@@ -540,20 +537,20 @@ std::string BigUInt<B>::toDec() const
     return result;
 }
 
-template <std::size_t B>
-BigUInt<2 * B> fullMultiply(BigUInt<B> const& lhs, BigUInt<B> const& rhs)
-{
-    BigUInt<2 * B> result = 0;
+template <std::size_t B1, std::size_t B2>
+BigUInt<B1+B2> fullMultiply(BigUInt<B1> const& lhs, BigUInt<B2> const& rhs)
+{    
+    BigUInt<B1+B2> result = 0;
     uint64_t carry;
-    for (size_t i = 0; i < BigUInt<B>::VLEN; ++i) {
+    for (size_t i = 0; i < BigUInt<B2>::VLEN; ++i) {
 	carry = 0;
-	for (size_t j = 0; j < BigUInt<B>::VLEN; ++j) {
+	for (size_t j = 0; j < BigUInt<B1>::VLEN; ++j) {
 	    uint64_t tmp = static_cast<uint64_t>(lhs.data()[j]) * rhs.data()[i]
 		+ carry + result.data()[i + j];
-	    result.data()[i + j] = (tmp & BigUInt<B>::mask_);
+	    result.data()[i + j] = (tmp & BigUInt<B1>::mask_);
 	    carry = tmp / 0x10000 / 0x10000; // mod 2^32
 	}
-	result.data()[i + BigUInt<B>::VLEN] = carry;
+	result.data()[i + BigUInt<B1>::VLEN] = carry;
     }
 
     return result;

@@ -25,6 +25,8 @@ class BigUInt
     friend class BigUInt<BITS_ /2>;  
     
 public:
+    using inner_type = uint32_t;
+    
     static constexpr std::size_t VLEN = BITS_ / 32;
     static const std::size_t BITS = BITS_;
     
@@ -35,6 +37,23 @@ public:
 	    result += *it - '0';
 	}
 	return result;
+    }
+
+    static self fromHex(const std::string& hexString) {
+        auto toNum = [](char ch) {
+            if (ch >= '0' && ch <= '9') {
+                return ch - '0';
+            } else if (ch >= 'a' && ch <= 'f') {
+                return ch - 'a' + 10;
+            } else
+                assert(false);
+        };
+        self result;
+        for (auto it = hexString.begin(); it != hexString.end(); ++it) {
+            result *= 16;
+            result += toNum(*it);
+        }
+        return result;
     }
     
     BigUInt() : data_( VLEN, 0 ) {}
@@ -151,6 +170,7 @@ public:
 	
     std::string toBitString() const;
     std::string toDec() const;
+    std::string toHex() const;
     std::size_t countSignificand() const;
 
     std::vector<uint32_t>& data() {
@@ -534,6 +554,29 @@ std::string BigUInt<B>::toDec() const
 	result.pop_back();
     std::reverse(result.begin(), result.end());
     
+    return result;
+}
+
+template<std::size_t B>
+std::string BigUInt<B>::toHex() const
+{
+    auto intToHex = [](uint32_t v) ->char {
+        if (v >= 0 && v <= 9)
+            return v + '0';
+        else if (v >=10 && v < 16)
+            return v - 10 + 'a';
+        else
+            assert(false);
+    };
+    
+    std::string result;
+    int i;
+    auto copy = *this;
+    while (copy > 0) {
+        uint32_t rmd = copy.divideU32(16);
+        result.push_back(intToHex(rmd));        
+    }
+    std::reverse(result.begin(), result.end());
     return result;
 }
 

@@ -24,7 +24,9 @@ BigUInt<CipherChunkBits> decryptUsingChineseRemainderTheorem_par(
     BigUInt<CipherChunkBits> const& cipher, BigUInt<CipherChunkBits> const& d,
     BigUInt<CipherChunkBits> const& n, BigUInt<CipherChunkBits/2> const& p,
     BigUInt<CipherChunkBits/2> const& q, BigUInt<CipherChunkBits/2> const& pInv,
-    BigUInt<CipherChunkBits/2> const& qInv);
+    BigUInt<CipherChunkBits/2> const& qInv,
+    ContextOfMontgomery<CipherChunkBits/2> const& pContext,
+    ContextOfMontgomery<CipherChunkBits/2> const& qContext);
 
 int main(int argc, char* argv[])
 {
@@ -62,6 +64,7 @@ void encrypt(const char* src, const char* dst, const char* keyFile)
 
     BigUInt<PrimeBits * 2> e, n;
     readKeys(keyFile, e, n);
+    ContextOfMontgomery<PrimeBits * 2> context(n);
     
     std::size_t srcsz = fileSize(fpsrc);
     std::fwrite(&srcsz, sizeof(srcsz), 1, fpdst);
@@ -81,7 +84,7 @@ void encrypt(const char* src, const char* dst, const char* keyFile)
 	    }
 	}
 
-	auto encrypted = modularExp_montgomery(plainBuff, e, n);
+	auto encrypted = modularExp_montgomery(plainBuff, e, n, context);
 	if (std::fwrite(encrypted.data().data(), 1, CipherUnitBytes, fpdst) != CipherUnitBytes) {
 	    std::fprintf(stderr, "fwrite error\n");
 	    std::exit(2);
@@ -109,6 +112,8 @@ void decrypt(const char* src, const char* dst, const char* keyFile)
     BigUInt<2*PrimeBits> d, n;
     BigUInt<PrimeBits> p, q, pInv, qInv;
     readKeys(keyFile, d, n, p, q, pInv, qInv);
+    ContextOfMontgomery<PrimeBits> pContext(p);
+    ContextOfMontgomery<PrimeBits> qContext(q);
 
     std::size_t dstsz;
     if (std::fread(&dstsz, sizeof(std::size_t), 1, fpsrc) != 1) {
@@ -144,7 +149,8 @@ void decrypt(const char* src, const char* dst, const char* keyFile)
 	dstsz -= nwrite;
 
 	BigUInt<CipherUnitBytes * 8> decrypted
-		= decryptUsingChineseRemainderTheorem_par(cipherBuff, d, n, p, q, pInv, qInv);
+	    = decryptUsingChineseRemainderTheorem_par(cipherBuff, d, n, p, q,
+						      pInv, qInv, pContext, qContext);
 	if (std::fwrite(decrypted.data().data(), 1, nwrite, fpdst) != nwrite) {
 	    std::fprintf(stderr, "fwrite error\n");
 	    std::exit(3);
@@ -190,18 +196,20 @@ BigUInt<CipherChunkBits> decryptUsingChineseRemainderTheorem_par(
     BigUInt<CipherChunkBits> const& cipher, BigUInt<CipherChunkBits> const& d,
     BigUInt<CipherChunkBits> const& n, BigUInt<CipherChunkBits/2> const& p,
     BigUInt<CipherChunkBits/2> const& q, BigUInt<CipherChunkBits/2> const& pInv,
-    BigUInt<CipherChunkBits/2> const& qInv)
+    BigUInt<CipherChunkBits/2> const& qInv,
+    ContextOfMontgomery<CipherChunkBits/2> const& pContext,
+    ContextOfMontgomery<CipherChunkBits/2> const& qContext)
 {
     std::future<BigUInt<CipherChunkBits/2>>
 	fut1 = std::async([&](){
 			      auto cipher1 = modLess(cipher, p);
 			      auto d1 = modLess(d, p - 1);
-			      return modularExp_montgomery(cipher1, d1, p);
+			      return modularExp_montgomery(cipher1, d1, p, pContext);
 			  }),
 	fut2 = std::async([&](){
 			      auto cipher2 = modLess(cipher, q);
 			      auto d2 = modLess(d, q - 1);
-			      return modularExp_montgomery(cipher2, d2, q);
+			      return modularExp_montgomery(cipher2, d2, q, qContext);
 			  });
 
     auto m1 = fut1.get();

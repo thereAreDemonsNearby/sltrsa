@@ -7,6 +7,7 @@
 #include <tuple>
 #include <thread>
 #include <atomic>
+#include <iostream>
 #include "biguint.hpp"
 #include "TimerGuard.h"
 
@@ -43,8 +44,8 @@ public:
 	mask <<= offset;
 	return mask & num;
     }
-    BitIterator& operator++() {	++offset; }
-    BitIterator& operator--() {	--offset; }
+    BitIterator& operator++() {	++offset; return *this; }
+    BitIterator& operator--() {	--offset; return *this; }
     static BitIterator end() { return {0, sizeof(Integer)*8}; }
     static BitIterator beforeBegin() { return {0, -1}; }
 };
@@ -182,7 +183,7 @@ exgcd(const Integer& a, const Integer& b,
 }
 
 
-// ax = b (mod n)
+// ax = b (mod n), compute x
 template<typename Integer>
 bool modularLinearEquation(Integer* result, const Integer& a, const Integer& b, const Integer& n)
 {
@@ -256,12 +257,12 @@ BigUInt<B2 - 32> modPowerOf2(BigUInt<B1> const& v, BigUInt<B2> const& powerOf2)
 // modulus * x = -1(modR)
 template <std::size_t B>
 BigUInt<B> REDC(BigUInt<2*B> const& v, BigUInt<B+32> const& r,
-		BigUInt<B+32> const& modulusExtended,
+		BigUInt<B> const& modulus, BigUInt<B+32> const& modulusExtended,
 		BigUInt<B+32> const& x)
 {
-    BigUInt<B> m = modPowerOf2(fullMultiply(modPowerOf2(v, r), x), r);
+    BigUInt<B> m = modPowerOf2(fullMultiply(modPowerOf2(v, r).template resize<B+32>(), x), r);
     auto t = ((v.template resize<2*B+32>()
-		+ fullMultiply(m, modulusExtended))
+               + fullMultiply(m, modulus).template resize<2*B+32>())
 	      >> B).template resize<B+32>();
     
     
@@ -273,35 +274,53 @@ BigUInt<B> REDC(BigUInt<2*B> const& v, BigUInt<B+32> const& r,
 }
 
 template <std::size_t B>
+struct ContextOfMontgomery
+{
+    ContextOfMontgomery(BigUInt<B> const& modulus)
+    {
+	auto tup = findR(modulus.template resize<B + 32>());
+	r = std::move(std::get<0>(tup));
+	x = std::move(std::get<1>(tup));
+	y = std::move(std::get<2>(tup));
+    }
+
+    // r * y - modulus * x = 1;
+    BigUInt<B + 32> r;
+    BigUInt<B + 32> x;
+    BigUInt<B + 32> y;
+};
+
+template <std::size_t B>
 BigUInt<B> modularExp_montgomery(BigUInt<B> const& base, BigUInt<B> const& exp,
-				 BigUInt<B> const& modulus)
+				 BigUInt<B> const& modulus, ContextOfMontgomery<B> const& context)
 {
     // the highest bit of modulus is 1, which means modulus has exactly B bits.
 
     // r, x and y are BigUInt<B+32>
     // r*y - modulus*x == 1
     auto modulusExt = modulus.template resize<B+32>();
-    auto [r, x, y] = findR(modulusExt);
-    BigUInt<B> baseMF = modLess(fullMultiply(base, r), modulus); // montgomery form of base
-    BigUInt<B> dMF = modLess(r, modulus); // d is 1, whose mf is 1 * r mod N
+    // auto [r, x, y] = findR(modulusExt);
+    BigUInt<B> baseMF = modLess(fullMultiply(base, context.r), modulus); // montgomery form of base
+    BigUInt<B> dMF = modLess(context.r, modulus); // d is 1, whose mf is 1 * r mod N
     BitIterator<BigUInt<B>> bIter{exp, BigUInt<B>::BITS - 1};
     auto end = BitIterator<BigUInt<B>>::beforeBegin();
     while (!(*bIter)) {
     	--bIter;
     }
     while (bIter != end) {
-	dMF = REDC<B>(fullMultiply(dMF, dMF), r, modulusExt, x);
+	dMF = REDC<B>(fullMultiply(dMF, dMF), context.r, modulus, modulusExt, context.x);
 	if (*bIter) {
-	    dMF = REDC<B>(fullMultiply(dMF, baseMF), r, modulusExt, x);
+	    dMF = REDC<B>(fullMultiply(dMF, baseMF), context.r, modulus, modulusExt, context.x);
 	}
 	--bIter;
     }
 
-    return REDC<B>(dMF.template resize<2*B>(), r, modulusExt, x);
+    return REDC<B>(dMF.template resize<2*B>(), context.r, modulus, modulusExt, context.x);
 }
 
 template<std::size_t B>
-bool millerRabin_witness(const BigUInt<B>& a, const BigUInt<B>& n)
+bool millerRabin_witness(const BigUInt<B>& a, const BigUInt<B>& n,
+			 ContextOfMontgomery<B> const& context)
 {
     BigUInt<B> m = n - 1;
     int t = 0;
@@ -312,7 +331,7 @@ bool millerRabin_witness(const BigUInt<B>& a, const BigUInt<B>& n)
 	++iter;
     }
     BigUInt<B> u = m >> t;
-    BigUInt<2*B> x0 = modularExp_montgomery(a, u, n).extend();
+    BigUInt<2*B> x0 = modularExp_montgomery(a, u, n, context).extend();
     BigUInt<2*B> exN = n.extend();
     BigUInt<2*B> one{ 1 };
     BigUInt<2*B> exM = m.extend();
@@ -331,66 +350,39 @@ bool millerRabin_witness(const BigUInt<B>& a, const BigUInt<B>& n)
 }
 
 // return true if n is composite
-template<typename Integer>
-bool millerRabin(const Integer& n)
+template<std::size_t B>
+bool millerRabin(BigUInt<B> const& n)
 {
+    ContextOfMontgomery<B> context(n);
     for (int i = 1; i <= 50; ++i) {
-    	auto a = Random<Integer>()(1, n-1);
-    	if (millerRabin_witness(a, n))
+    	auto a = Random<BigUInt<B>>()(1, n-1);
+    	if (millerRabin_witness(a, n, context))
     	    return true;
     }
     return false;
 }
 
-template<typename Integer>
-bool millerRabin2(const Integer& n, int times)
+template<std::size_t B>
+bool millerRabin_par(BigUInt<B> const& n, int threadNum)
 {
-    std::atomic_bool composite(false);
-    auto thrdFunc = [&composite, &n]() {
-			for (int i = 1; i < 5; ++i) {
-			    if (composite == true) {
-				return;
-			    }
-			    auto a = Random<Integer>()(1, n-1);
-			    if (millerRabin_witness(a, n)) {
-				composite = true;
-				return;
-			    }
-			} 
-		    };
-
-    std::thread threads[4];
-    for (auto& thrd : threads) {
-	thrd = std::thread(thrdFunc);
-    }
-
-    for (auto& thrd : threads) {
-	thrd.join();
-    }
-
-    return composite;
-}
-
-template<typename Integer>
-bool millerRabin_par(const Integer& n, int threadNum)
-{
-    auto a = Random<Integer>()(1, n-1);
-    if (millerRabin_witness(a, n))
+    ContextOfMontgomery<B> context(n);
+    auto a = Random<BigUInt<B>>()(1, n-1);
+    if (millerRabin_witness(a, n, context))
 	return true;
     
     std::atomic_bool composite(false);
-    auto thrdFunc = [&composite, &n](int loop) {
-			for (int i = 0; i < loop; ++i) {
-			    if (composite == true) {
-				return;
-			    }
-			    auto a = Random<Integer>()(1, n-1);
-			    if (millerRabin_witness(a, n)) {
-				composite = true;
-				return;
-			    }
-			}
-		    };
+    auto thrdFunc = [&composite, &n, &context](int loop) {
+        for (int i = 0; i < loop; ++i) {
+            if (composite == true) {
+                return;
+            }
+            auto a = Random<BigUInt<B>>()(1, n-1);
+            if (millerRabin_witness(a, n, context)) {
+                composite = true;
+                return;
+            }
+        }
+    };
 
     std::vector<std::thread> threads(threadNum);
     int tasksPerThread = 19 / threadNum;
@@ -436,6 +428,37 @@ bool modInverse(BigUInt<Bits> const& a, BigUInt<Bits> const& n, BigUInt<Bits>& r
     return true;
 }
 
+template <typename Int>
+size_t significantBits(Int v)
+{ 
+    BitIterator<Int> iter(v, 8 * sizeof(Int) - 1);
+    auto end = BitIterator<Int>::beforeBegin();
+    size_t zeroCnt = 0;
+    while (iter != end) {
+	if (!*iter) {
+	    ++zeroCnt;
+	} else {
+	    return 8 * sizeof(Int) - zeroCnt;
+	}
+	--iter;
+    }
 
+    // all zero
+    assert(v == 0);
+    return 1;
+}
+
+template <std::size_t B>
+size_t significantBits(BigUInt<B> const& v)
+{
+    for (int i = BigUInt<B>::VLEN - 1; i >= 0; --i) {
+	if (v.data()[i] != 0) {
+	    size_t s = significantBits(v.data()[i]);
+	    return s + 8 * sizeof(typename BigUInt<B>::inner_type) * i;
+	}
+    }
+
+    return 1;
+}
 
 #endif // NTALGO_HPP_

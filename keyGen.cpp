@@ -30,17 +30,18 @@ int main(int argc, char** argv)
 	BigUInt<PrimeBits> p, q;
 
 	{
-	    TimerGuard tg("Time used for gen prime 1: ");
+	    TimerGuard tg("Time used for gen the first prime: ");
 	    p = primeGen_par<PrimeBits>(threadNum);
 	}
 
 	{
-	    TimerGuard tg("Time used for gen prime 2: ");
+	    TimerGuard tg("Time used for gen the second prime: ");
 	    q = primeGen_par<PrimeBits>(threadNum);
 	}
 	
 	
 	auto n = fullMultiply(p, q);
+	// std::cout << "n width: " << significantBits(n) << std::endl;
 	auto phiN = fullMultiply(p - 1, q - 1);
 	BigUInt<PrimeBits * 2> d;
 	if (!modInverse(e, phiN, d)) {

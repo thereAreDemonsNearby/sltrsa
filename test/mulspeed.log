@@ -1,0 +1,36 @@
+Bit length: 256 Mul times: 10000
+normal: 0.000648326
+normal simd: 0.00061508
+normal multithread:  0.00880542
+comba:  0.000747602
+comba simd:  0.000935506
+Bit length: 512 Mul times: 10000
+normal: 0.00195779
+normal simd: 0.00199676
+normal multithread:  0.00949296
+comba:  0.00233036
+comba simd:  0.00220571
+Bit length: 1024 Mul times: 10000
+normal: 0.00681302
+normal simd: 0.00729657
+normal multithread:  0.0121237
+comba:  0.00906712
+comba simd:  0.00567677
+Bit length: 2048 Mul times: 10000
+normal: 0.0311053
+normal simd: 0.0279836
+normal multithread:  0.0193082
+comba:  0.0323417
+comba simd:  0.0163929
+Bit length: 4096 Mul times: 10000
+normal: 0.128158
+normal simd: 0.116709
+normal multithread:  0.0435139
+comba:  0.119596
+comba simd:  0.0530585
+Bit length: 8192 Mul times: 10000
+normal: 0.504084
+normal simd: 0.446212
+normal multithread:  0.12234
+comba:  0.455277
+comba simd:  0.196255

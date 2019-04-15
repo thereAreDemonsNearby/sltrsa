@@ -1,0 +1,60 @@
+Bit length: 256 Mul times: 10000
+normal: 0.000609434
+normal simd: 0.000637124
+normal multithread with 2 cores: 0.00544574
+normal multithread with 3 cores: 0.00626828
+normal multithread with 4 cores: 0.00732967
+normal multithread with 5 cores: 0.00945897
+normal multithread with 6 cores: 0.00920938
+comba:  0.0007932
+comba simd:  0.000901601
+Bit length: 512 Mul times: 10000
+normal: 0.00204633
+normal simd: 0.00198723
+normal multithread with 2 cores: 0.00618646
+normal multithread with 3 cores: 0.00740715
+normal multithread with 4 cores: 0.00919926
+normal multithread with 5 cores: 0.0103881
+normal multithread with 6 cores: 0.0119845
+comba:  0.00225335
+comba simd:  0.00217717
+Bit length: 1024 Mul times: 10000
+normal: 0.00802353
+normal simd: 0.00746475
+normal multithread with 2 cores: 0.00995219
+normal multithread with 3 cores: 0.0108745
+normal multithread with 4 cores: 0.0116967
+normal multithread with 5 cores: 0.0138891
+normal multithread with 6 cores: 0.0145623
+comba:  0.0088448
+comba simd:  0.00594146
+Bit length: 2048 Mul times: 10000
+normal: 0.0346645
+normal simd: 0.0291158
+normal multithread with 2 cores: 0.0227278
+normal multithread with 3 cores: 0.0194489
+normal multithread with 4 cores: 0.0271043
+normal multithread with 5 cores: 0.0209727
+normal multithread with 6 cores: 0.0252328
+comba:  0.0330399
+comba simd:  0.0166223
+Bit length: 4096 Mul times: 10000
+normal: 0.128314
+normal simd: 0.11454
+normal multithread with 2 cores: 0.0754543
+normal multithread with 3 cores: 0.0568265
+normal multithread with 4 cores: 0.0504736
+normal multithread with 5 cores: 0.06458
+normal multithread with 6 cores: 0.0639102
+comba:  0.119691
+comba simd:  0.0528399
+Bit length: 8192 Mul times: 10000
+normal: 0.497136
+normal simd: 0.445585
+normal multithread with 2 cores: 0.272236
+normal multithread with 3 cores: 0.191044
+normal multithread with 4 cores: 0.15784
+normal multithread with 5 cores: 0.136644
+normal multithread with 6 cores: 0.205114
+comba:  0.451976
+comba simd:  0.194687

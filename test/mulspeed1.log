@@ -1,0 +1,60 @@
+Bit length: 256 Mul times: 10000
+normal: 0.000582576
+normal simd: 0.000611124
+normal multithread with 2 cores: 0.0053762
+normal multithread with 3 cores: 0.0062767
+normal multithread with 4 cores: 0.00739851
+normal multithread with 5 cores: 0.00863863
+normal multithread with 6 cores: 0.00954807
+comba:  0.000746466
+comba simd:  0.000887064
+Bit length: 512 Mul times: 10000
+normal: 0.00204693
+normal simd: 0.00208776
+normal multithread with 2 cores: 0.00567898
+normal multithread with 3 cores: 0.00711129
+normal multithread with 4 cores: 0.0082305
+normal multithread with 5 cores: 0.00895748
+normal multithread with 6 cores: 0.0110786
+comba:  0.00229133
+comba simd:  0.0022703
+Bit length: 1024 Mul times: 10000
+normal: 0.00696614
+normal simd: 0.00745515
+normal multithread with 2 cores: 0.00999446
+normal multithread with 3 cores: 0.0104635
+normal multithread with 4 cores: 0.0113526
+normal multithread with 5 cores: 0.0137943
+normal multithread with 6 cores: 0.0146851
+comba:  0.00899611
+comba simd:  0.00596572
+Bit length: 2048 Mul times: 10000
+normal: 0.0348845
+normal simd: 0.028692
+normal multithread with 2 cores: 0.022397
+normal multithread with 3 cores: 0.019653
+normal multithread with 4 cores: 0.0209245
+normal multithread with 5 cores: 0.0250682
+normal multithread with 6 cores: 0.0285986
+comba:  0.0334359
+comba simd:  0.0170479
+Bit length: 4096 Mul times: 10000
+normal: 0.127967
+normal simd: 0.111982
+normal multithread with 2 cores: 0.0750416
+normal multithread with 3 cores: 0.0598179
+normal multithread with 4 cores: 0.0507001
+normal multithread with 5 cores: 0.0591832
+normal multithread with 6 cores: 0.0682226
+comba:  0.122544
+comba simd:  0.0532273
+Bit length: 8192 Mul times: 10000
+normal: 0.497369
+normal simd: 0.44694
+normal multithread with 2 cores: 0.271215
+normal multithread with 3 cores: 0.191957
+normal multithread with 4 cores: 0.157783
+normal multithread with 5 cores: 0.151036
+normal multithread with 6 cores: 0.192889
+comba:  0.45272
+comba simd:  0.194506

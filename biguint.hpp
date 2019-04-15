@@ -63,6 +63,12 @@ public:
     }
     BigUInt(const self&) = default;
     BigUInt(self&&) = default;
+    template <std::size_t B, typename=std::enable_if_t<B != BITS_, void>>
+    BigUInt(BigUInt<B>&& another)
+        : data_(std::move(another.data()))
+    {
+        data_.resize(BITS_ / 32, 0);
+    }
     self& operator= (const self& rhs) = default;
     self& operator= (self&& rhs) = default;
     self& operator= (uint64_t u) {
@@ -112,6 +118,12 @@ public:
 	}
 	return *this;
     }
+
+    BigUInt& reset() {
+        for (auto& e : data_)
+            e = 0;
+        return *this;
+    }
     
     // unsigned compare
     int compare(const self& rhs) const;
@@ -157,6 +169,12 @@ public:
 	for (int i = 0; i < less / 32; ++i) {
 	    res.data()[i] = data_[i];
 	}
+	return res;
+    }
+
+    template<size_t MoreOrLessBits>
+    BigUInt<MoreOrLessBits> resizeMove() && {  
+	BigUInt<MoreOrLessBits> res(std::move(*this));
 	return res;
     }
 
@@ -257,7 +275,7 @@ private:
 
 
 template<std::size_t B>
-BigUInt<B> BigUInt<B>::operator+(const BigUInt& rhs) const
+BigUInt<B> BigUInt<B>::operator+(const BigUInt<B>& rhs) const
 {
     uint64_t carry = 0;
     self result;

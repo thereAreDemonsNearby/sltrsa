@@ -1,0 +1,28 @@
+#include "../biguint.hpp"
+#include "../fullMultiply_alter.hpp"
+#include "../TimerGuard.h"
+
+int main()
+{
+    constexpr size_t B = 1024;
+    for (int i = 0; i < 100; ++i) {
+        auto a = BigUInt<B>::randomGen();
+        auto b = BigUInt<B>::randomGen();
+        BigUInt<B+B> res1, res2;
+
+        {
+            TimerGuard rg("normal:");
+            res1 = fullMultiply(a, b);
+        }
+
+        {
+            TimerGuard tg("comba:");
+            res2 = fullMultiply_comba(a, b);
+        }
+
+        if (res1 != res2) {
+            std::cout << res1.toDec() << "\n" << res2.toDec() << std::endl;
+            std::exit(1);
+        }
+    }
+}

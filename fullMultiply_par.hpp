@@ -1,6 +1,8 @@
 #ifndef FULLMULTIPLY_PAR_HPP
 #define FULLMULTIPLY_PAR_HPP
 
+/* this file contains some failed */
+
 #include <thread>
 #include <memory>
 #include <mutex>
@@ -114,6 +116,13 @@ fullMultiply_simd(BigUInt<B1> const& lhs, BigUInt<B2> const& rhs)
 class FixedMulPool
 {
 private:
+    struct CV
+    {
+        bool readyToWork = false;
+        std::condition_variable cvReadyToWork;
+        std::mutex mutexReadyToWork;
+    };
+    
     struct Data
     {
         const int thrdNum;
@@ -122,19 +131,16 @@ private:
         std::vector<uint32_t> const* rhs = nullptr;
         std::vector<std::pair<std::size_t, std::size_t>> ranges;
         std::vector<std::vector<uint32_t>> buffers;
-
-        bool readyToWork = false;
-        std::condition_variable cvReadyToWork;
-        std::mutex mutexReadyToWork;
+        std::vector<CV> cvs;
         int numWorking = 0;
 
-        std::condition_variable cvDone;
         std::mutex mutexDone;
-        int numDone = 0;
+        std::condition_variable cvDone;
+        int numDone;
 
         std::atomic_bool shouldExit;
 
-        Data(int tn) : thrdNum(tn), ranges(tn), shouldExit(false), buffers(tn) {}
+        Data(int tn) : thrdNum(tn), ranges(tn), shouldExit(false), buffers(tn), cvs(tn) {}
     };
 
     struct Worker
@@ -147,12 +153,9 @@ private:
         {
             while (true) {
                 {
-                    std::unique_lock<std::mutex> lck(data_->mutexReadyToWork);
-                    data_->cvReadyToWork.wait(lck, [d=data_](){ return d->readyToWork; });
-                    ++data_->numWorking;
-                    if (data_->numWorking == data_->thrdNum) {
-                        data_->readyToWork = false;
-                    }
+                    std::unique_lock<std::mutex> lck(data_->cvs[id].mutexReadyToWork);
+                    data_->cvs[id].cvReadyToWork.wait(lck, [d=data_, id](){ return d->cvs[id].readyToWork; });
+                    data_->cvs[id].readyToWork = false;
                 }
 
                 if (data_->shouldExit)
@@ -180,13 +183,9 @@ private:
                     buf[i + len] += carry;
                 }   
                 
-                {
-                    std::unique_lock<std::mutex> lck(data_->mutexDone);
-                    ++data_->numDone;
-                    if (data_->numDone == data_->thrdNum) {
-                        lck.unlock();
-                        data_->cvDone.notify_one();
-                    }
+                ++data_->numDone;
+                if (data_->numDone == data_->thrdNum) {
+                    data_->cvDone.notify_one();
                 }
                 std::this_thread::yield();
             } // end while
@@ -209,10 +208,11 @@ public:
     ~FixedMulPool()
     {
         data_.shouldExit = true;
-        std::unique_lock<std::mutex> lck(data_.mutexReadyToWork);
-        data_.readyToWork = true;
-        lck.unlock();
-        data_.cvReadyToWork.notify_all();
+        for (auto& cv : data_.cvs) {
+            cv.readyToWork = true;
+            cv.cvReadyToWork.notify_one();
+        }
+
         for (auto& t : thrds_) {
             t.join();
         }
@@ -233,18 +233,16 @@ public:
             b.resize(res.size());
             std::fill(b.begin(), b.end(), 0);
         }
-        
-        std::unique_lock<std::mutex> lck(data_.mutexReadyToWork);
-        data_.readyToWork = true;
-        lck.unlock();
-        data_.cvReadyToWork.notify_all();
+
+        for (auto& cv : data_.cvs) {
+            cv.readyToWork = true;
+            cv.cvReadyToWork.notify_one();
+        }
     }
 
     void stop()
     {
         data_.numDone = 0;
-        data_.numWorking = 0;
-        data_.readyToWork = false;
     }
 
     std::mutex& mutexDone()
@@ -260,6 +258,154 @@ public:
     std::vector<std::vector<uint32_t>>& buffers() { return data_.buffers; }
 
     int numDone() { return data_.numDone; }
+
+    int thrdNum() { return data_.thrdNum; }
+};
+
+class FixedMulPool_noCv
+{
+private:    
+    struct Data
+    {
+        const int thrdNum;
+        std::vector<uint32_t>* result = nullptr;
+        std::vector<uint32_t> const* lhs = nullptr;
+        std::vector<uint32_t> const* rhs = nullptr;
+        std::vector<std::pair<std::size_t, std::size_t>> ranges;
+        std::vector<std::vector<uint32_t>> buffers;
+        
+        std::vector<std::mutex> enterMut;
+        std::vector<std::mutex> quitMut;
+
+        std::atomic_int numOut; // out of critical section
+
+        std::atomic_bool shouldExit;
+        
+        Data(int tn) : thrdNum(tn), ranges(tn), buffers(tn),
+                       enterMut(tn), quitMut(tn), numOut(0),
+                       shouldExit(false) {}
+    };
+
+    struct Worker
+    {
+        Data* data_;
+        Worker(Data* d)
+            : data_(d) {}
+        
+        void operator()(int id)
+        {
+            while (true) {
+                data_->enterMut[id].lock(); // try to get in
+                fmt::print(stderr, "thrd {} comes in\n", id);                
+                if (data_->shouldExit)
+                    return;
+                // ++data_->numIn;
+
+                auto plhs = data_->lhs;
+                auto prhs = data_->rhs;
+                auto len = plhs->size();
+                auto beg = data_->ranges[id].first;
+                auto end = data_->ranges[id].second;
+                std::vector<uint32_t>& buf = data_->buffers[id];
+                buf.resize(plhs->size() + prhs->size());
+                std::fill(buf.begin(), buf.end(), 0);
+
+                constexpr uint64_t mask = 0xffffffff;
+                uint32_t carry;
+                for (std::size_t i = beg; i < end; ++i) {
+                    carry = 0;
+                    for (std::size_t j = 0; j < len; ++j) {
+                        auto sum = buf[i+j]
+                            + static_cast<uint64_t>((*plhs)[j]) * (*prhs)[i]
+                            + carry;
+                        static_assert(sizeof sum == 8);
+                        buf[i+j] = sum & mask;
+                        carry = (sum >> 16) >> 16;
+                    }
+                    buf[i + len] += carry;
+                }
+                data_->enterMut[id].unlock();
+
+                fmt::print(stderr, "got here: {}\n", id);
+                data_->quitMut[id].lock();
+                fmt::print(stderr, "lock acquired: {}\n", id);
+                data_->quitMut[id].unlock();
+                ++data_->numOut;
+                std::this_thread::yield();
+            } // end while
+        }
+    };
+
+    Data data_;
+    std::vector<std::thread> thrds_;
+
+public:
+    // can only accept tasks equal to threadNum
+    FixedMulPool_noCv(int threadNum)
+        : data_(threadNum)
+    {        
+        for (auto& lk : data_.enterMut) {
+            lk.lock();
+        }
+        for (auto& lk : data_.quitMut) {
+            lk.lock();
+        }
+        for (int i = 0; i < threadNum; ++i) {
+            thrds_.push_back(std::thread(Worker(&data_), i));
+        }
+        std::this_thread::yield();
+    }
+
+    ~FixedMulPool_noCv()
+    {
+        data_.shouldExit = true;
+        for (auto& lk : data_.enterMut) {
+            lk.unlock();
+        }
+
+        for (auto& t : thrds_) {
+            t.join();
+        }
+    }
+
+    void addRange(std::size_t idx, std::size_t b, std::size_t e) {
+        data_.ranges[idx].first = b;
+        data_.ranges[idx].second = e;
+    }
+    
+    void start(std::vector<uint32_t> const& lhs, std::vector<uint32_t> const& rhs,
+               std::vector<uint32_t>& res)
+    {
+        data_.lhs = &lhs;
+        data_.rhs = &rhs;
+        data_.result = &res;
+
+        for (auto& lk : data_.enterMut) {
+            lk.unlock();
+        }
+        std::this_thread::yield();
+    }
+
+    void wait()
+    {        
+        for (auto& lk : data_.enterMut) {
+            lk.lock();
+        }
+        for (auto& lk : data_.quitMut) {
+            lk.unlock();
+        }
+        std::this_thread::yield();
+        while (data_.numOut != data_.thrdNum) {
+            // fmt::print("{0} : {1}\n", data_.numOut, data_.thrdNum);
+            std::this_thread::yield();
+        }
+        data_.numOut = 0;
+        for (auto& lk : data_.quitMut) {
+            lk.lock();
+        }
+    }
+
+    std::vector<std::vector<uint32_t>>& buffers() { return data_.buffers; }
 
     int thrdNum() { return data_.thrdNum; }
 };
@@ -400,7 +546,7 @@ public:
 };
 
 template <std::size_t B1, std::size_t B2>
-BigUInt<B1+B2> fullMultiply_multithrd(BigUInt<B1> const& lhs, BigUInt<B2> const& rhs, FixedMulPool& pool)
+BigUInt<B1+B2> fullMultiply_multithrd(BigUInt<B1> const& lhs, BigUInt<B2> const& rhs, FixedMulPool_noCv& pool)
 {
     BigUInt<B1+B2> result;
     int thrdNum = pool.thrdNum();
@@ -421,10 +567,7 @@ BigUInt<B1+B2> fullMultiply_multithrd(BigUInt<B1> const& lhs, BigUInt<B2> const&
     }
     
     pool.start(lhs.data(), rhs.data(), result.data());
-    {
-        std::unique_lock<std::mutex> lck(pool.mutexDone());
-        pool.cvDone().wait(lck, [&pool, thrdNum](){ return pool.numDone() == thrdNum; });
-    }
+    pool.wait();
     std::vector<std::vector<uint32_t>>& buffers = pool.buffers();
     for (auto& v : buffers) {
         addInPlace(result.data(), v);
@@ -432,7 +575,6 @@ BigUInt<B1+B2> fullMultiply_multithrd(BigUInt<B1> const& lhs, BigUInt<B2> const&
     // for (int i = 0; i < buffers.size(); i += 2) {
     //     addInPlace(result.data(), buffers[i]);
     // }
-    pool.stop();
 
     return result;    
 }

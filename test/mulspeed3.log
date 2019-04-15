@@ -1,0 +1,60 @@
+Bit length: 256 Mul times: 10000
+normal: 0.000623496
+normal simd: 0.000623325
+normal multithread with 2 cores: 0.00530333
+normal multithread with 3 cores: 0.00616259
+normal multithread with 4 cores: 0.00837908
+normal multithread with 5 cores: 0.00840236
+normal multithread with 6 cores: 0.009541
+comba:  0.000709126
+comba simd:  0.000931769
+Bit length: 512 Mul times: 10000
+normal: 0.00191857
+normal simd: 0.00194353
+normal multithread with 2 cores: 0.0056845
+normal multithread with 3 cores: 0.00668413
+normal multithread with 4 cores: 0.00818958
+normal multithread with 5 cores: 0.0101067
+normal multithread with 6 cores: 0.0113761
+comba:  0.00224381
+comba simd:  0.0021714
+Bit length: 1024 Mul times: 10000
+normal: 0.00701038
+normal simd: 0.00751946
+normal multithread with 2 cores: 0.0101516
+normal multithread with 3 cores: 0.0108205
+normal multithread with 4 cores: 0.0115909
+normal multithread with 5 cores: 0.0132916
+normal multithread with 6 cores: 0.0134151
+comba:  0.00869859
+comba simd:  0.00584417
+Bit length: 2048 Mul times: 10000
+normal: 0.0348298
+normal simd: 0.0280242
+normal multithread with 2 cores: 0.0225558
+normal multithread with 3 cores: 0.0199209
+normal multithread with 4 cores: 0.0207476
+normal multithread with 5 cores: 0.0253855
+normal multithread with 6 cores: 0.0286419
+comba:  0.0327798
+comba simd:  0.0168848
+Bit length: 4096 Mul times: 10000
+normal: 0.128058
+normal simd: 0.112215
+normal multithread with 2 cores: 0.0755483
+normal multithread with 3 cores: 0.0580139
+normal multithread with 4 cores: 0.0505064
+normal multithread with 5 cores: 0.0669417
+normal multithread with 6 cores: 0.0646513
+comba:  0.121061
+comba simd:  0.0533462
+Bit length: 8192 Mul times: 10000
+normal: 0.50021
+normal simd: 0.446847
+normal multithread with 2 cores: 0.270354
+normal multithread with 3 cores: 0.194532
+normal multithread with 4 cores: 0.160057
+normal multithread with 5 cores: 0.137264
+normal multithread with 6 cores: 0.201579
+comba:  0.452282
+comba simd:  0.195523

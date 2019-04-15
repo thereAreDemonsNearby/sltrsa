@@ -1,0 +1,24 @@
+bitlen:512, loops:100, serial 6.02739
+bitlen:512, loops:100, par, threadnum:2 4.14401
+bitlen:512, loops:100, par, threadnum:3 3.33094
+bitlen:512, loops:100, par, threadnum:4 2.5475
+bitlen:512, loops:100, par, threadnum:5 2.10925
+bitlen:512, loops:100, par, threadnum:6 1.93373
+bitlen:1024, loops:100, serial 36.2282
+bitlen:1024, loops:100, par, threadnum:2 23.9163
+bitlen:1024, loops:100, par, threadnum:3 18.3052
+bitlen:1024, loops:100, par, threadnum:4 15.4877
+bitlen:1024, loops:100, par, threadnum:5 13.6191
+bitlen:1024, loops:100, par, threadnum:6 12.0496
+bitlen:2048, loops:50, serial 187.949
+bitlen:2048, loops:50, par, threadnum:2 118.301
+bitlen:2048, loops:50, par, threadnum:3 89.661
+bitlen:2048, loops:50, par, threadnum:4 59.1215
+bitlen:2048, loops:50, par, threadnum:5 55.0222
+bitlen:2048, loops:50, par, threadnum:6 50.6189
+bitlen:4096, loops:10, serial 224.099
+bitlen:4096, loops:10, par, threadnum:2 354.716
+bitlen:4096, loops:10, par, threadnum:3 191.342
+bitlen:4096, loops:10, par, threadnum:4 181.821
+bitlen:4096, loops:10, par, threadnum:5 170.15
+bitlen:4096, loops:10, par, threadnum:6 110.192

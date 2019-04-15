@@ -200,20 +200,26 @@ BigUInt<CipherChunkBits> decryptUsingChineseRemainderTheorem_par(
     ContextOfMontgomery<CipherChunkBits/2> const& pContext,
     ContextOfMontgomery<CipherChunkBits/2> const& qContext)
 {
-    std::future<BigUInt<CipherChunkBits/2>>
-	fut1 = std::async([&](){
-			      auto cipher1 = modLess(cipher, p);
-			      auto d1 = modLess(d, p - 1);
-			      return modularExp_montgomery(cipher1, d1, p, pContext);
-			  }),
-	fut2 = std::async([&](){
-			      auto cipher2 = modLess(cipher, q);
-			      auto d2 = modLess(d, q - 1);
-			      return modularExp_montgomery(cipher2, d2, q, qContext);
-			  });
+    // std::future<BigUInt<CipherChunkBits/2>>
+    //     fut1 = std::async([&](){
+    //     		      auto cipher1 = modLess(cipher, p);
+    //     		      auto d1 = modLess(d, p - 1);
+    //     		      return modularExp_montgomery(cipher1, d1, p, pContext);
+    //     		  }),
+    //     fut2 = std::async([&](){
+    //     		      auto cipher2 = modLess(cipher, q);
+    //     		      auto d2 = modLess(d, q - 1);
+    //     		      return modularExp_montgomery(cipher2, d2, q, qContext);
+    //     		  });
 
-    auto m1 = fut1.get();
-    auto m2 = fut2.get();
+    // auto m1 = fut1.get();
+    // auto m2 = fut2.get();
+    auto cipher1 = modLess(cipher, p);
+    auto d1 = modLess(d, p - 1);
+    auto m1 = modularExp_montgomery(cipher1, d1, p, pContext);
+    auto cipher2 = modLess(cipher, q);
+    auto d2 = modLess(d, q - 1);
+    auto m2 = modularExp_montgomery(cipher2, d2, q, qContext);
 
     auto exN = n.template resize<CipherChunkBits*2>();
     auto m = fullMultiply(fullMultiply(m1, q), qInv.template resize<CipherChunkBits>())

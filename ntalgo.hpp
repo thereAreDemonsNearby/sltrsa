@@ -260,16 +260,16 @@ BigUInt<B> REDC(BigUInt<2*B> const& v, BigUInt<B+32> const& r,
 		BigUInt<B> const& modulus, BigUInt<B+32> const& modulusExtended,
 		BigUInt<B+32> const& x)
 {
-    BigUInt<B> m = modPowerOf2(fullMultiply(modPowerOf2(v, r).template resize<B+32>(), x), r);
+    BigUInt<B> m = modPowerOf2(fullMultiply(modPowerOf2(v, r).template resizeMove<B+32>(), x), r);
     auto t = ((v.template resize<2*B+32>()
-               + fullMultiply(m, modulus).template resize<2*B+32>())
-	      >> B).template resize<B+32>();
+               + fullMultiply(m, modulus).template resizeMove<2*B+32>())
+	      >> B).template resizeMove<B+32>();
     
     
     if (t >= modulusExtended) {
-	return (t - modulusExtended).template resize<B>();
+	return (t - modulusExtended).template resizeMove<B>();
     } else {
-	return t.template resize<B>();
+	return std::move(t).template resizeMove<B>();
     }
 }
 
@@ -354,7 +354,7 @@ template<std::size_t B>
 bool millerRabin(BigUInt<B> const& n)
 {
     ContextOfMontgomery<B> context(n);
-    for (int i = 1; i <= 50; ++i) {
+    for (int i = 1; i <= 20; ++i) {
     	auto a = Random<BigUInt<B>>()(1, n-1);
     	if (millerRabin_witness(a, n, context))
     	    return true;
@@ -362,44 +362,6 @@ bool millerRabin(BigUInt<B> const& n)
     return false;
 }
 
-template<std::size_t B>
-bool millerRabin_par(BigUInt<B> const& n, int threadNum)
-{
-    ContextOfMontgomery<B> context(n);
-    auto a = Random<BigUInt<B>>()(1, n-1);
-    if (millerRabin_witness(a, n, context))
-	return true;
-    
-    std::atomic_bool composite(false);
-    auto thrdFunc = [&composite, &n, &context](int loop) {
-        for (int i = 0; i < loop; ++i) {
-            if (composite == true) {
-                return;
-            }
-            auto a = Random<BigUInt<B>>()(1, n-1);
-            if (millerRabin_witness(a, n, context)) {
-                composite = true;
-                return;
-            }
-        }
-    };
-
-    std::vector<std::thread> threads(threadNum);
-    int tasksPerThread = 19 / threadNum;
-    int remainedTasks = 19 % threadNum;
-    
-    for (auto& thrd : threads) {
-	thrd = std::thread(thrdFunc, tasksPerThread);
-    }
-    if (remainedTasks > 0) {
-	std::thread(thrdFunc, remainedTasks).join();
-    }
-    for (auto& thrd : threads) {
-	thrd.join();
-    }
-
-    return composite;
-}
 
 template<size_t B>
 BigUInt<B> signedMod(BigUInt<B> a, BigUInt<B> const& n)

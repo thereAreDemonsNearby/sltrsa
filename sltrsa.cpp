@@ -3,20 +3,26 @@
 #include <utility>
 #include <cstring>
 #include <future>
+#include <filesystem>
+#include <string>
 #include "ntalgo.hpp"
 #include "TimerGuard.h"
 
-static constexpr std::size_t PrimeBits = 1024;
-static constexpr std::size_t PlainUnitBytes = PrimeBits / 8;
-static constexpr std::size_t CipherUnitBytes = 2 * PrimeBits / 8;
+static bool toNumber(char const* str, std::size_t* n)
+{
+    char* end;
+    *n = std::strtoul(str, &end, 10);
+    if (*end != '\0' || errno == ERANGE) {
+        return false;
+    } else {
+        return true;
+    }
+}
 
-// tuple of all keys
-template<typename... BIGUINTS>
-void readKeys(const char* keyfile, BIGUINTS&... args);
-
-std::size_t fileSize(std::FILE* fp);
-
+template<std::size_t KeyBits>
 void encrypt(const char* src, const char* dst, const char* keyFile);
+
+template<std::size_t KeyBits>
 void decrypt(const char* src, const char* dst, const char* keyFile);
 
 template<std::size_t CipherChunkBits>
@@ -28,26 +34,81 @@ BigUInt<CipherChunkBits> decryptUsingChineseRemainderTheorem_par(
     ContextOfMontgomery<CipherChunkBits/2> const& pContext,
     ContextOfMontgomery<CipherChunkBits/2> const& qContext);
 
+namespace fs = std::filesystem;
+
+static bool parallel = false;
+static int threadNum = 1;
+
 int main(int argc, char* argv[])
 {
-    if (argc != 5) {
-	fmt::print(stderr, "usage: {}3.0 [-e/-d] <key> <file> <result>\n", argv[0]);
-	std::exit(1);
+    std::File* keyFile;
+    std::File* src;
+    std::File* dst;
+    std::size_t srcSize;
+    
+    std::size_t idx = 1;
+    if (idx < argc && std::strcmp(argv[idx], "--help") == 0) {
+        fmt::print(stderr, "{} [-p threadNum] <key> [src] [dest]", argv[0])
+        std::exit(0);
     }
-    const char* keyfile = argv[2];
-    const char* src = argv[3];
-    const char* dst = argv[4];   
-
-    if (std::strcmp(argv[1], "-e") == 0) {
-	encrypt(src, dst, argv[2]);
-    } else if (std::strcmp(argv[1], "-d") == 0) {
-	decrypt(src, dst, argv[2]);
+    
+    if (idx < argc && std::strcmp(argv[idx], "-p") == 0) {
+        // enable parallel
+        ++idx;
+        parallel = true;
+        // read thread num
+        std::size_t tn;
+        if (idx < argc && toNumber(argv[idx], &tn)) {
+            ++idx;
+            threadNum = static_cast<int>(tn);            
+        } else {
+            fmt::print(stderr, "lack thread number after -p\n");
+            std::exit(1);
+        }
     } else {
-	fmt::print(stderr, "unknown option {}\n", argv[1]);
-	std::exit(1);
+        parallel = false;
     }
+    
+    if (idx < argc) {
+        ++idx;
+        if ((keyFile = std::fopen(argv[idx], "r")) == NULL) {
+            std::string msg = fmt::format("cannot open key file {}", argv[1]);
+            std::perror(msg.c_str());
+            std::exit(2);
+        }
+    } else {
+        fmt::print(stderr, "no key file specified\n");
+        std::exit(3);
+    }
+
+    if (idx < argc) {
+        if ((src = std::fopen(argv[idx], "rb")) == NULL) {
+            auto msg = fmt::format("cannot open file {}", argv[idx]);
+            std::perror(msg.c_str());
+            std::exit(3);
+        }
+        ++idx;
+        if (idx < argc) {
+            if ((dest = std::fopen(argv[idx], "rb")) == NULL) {
+                auto msg = fmt::format("cannot open file {}", argv[idx]);
+                std::perror(msg.c_str());
+                std::exit(4);
+            }
+            ++idx;
+            if (idx < argc) {
+                fmt::print(stderr, "too much argument\n");
+                std::exit(5);
+            }
+        } else {
+            dest = stdout;
+        }
+    } else {
+        src = stdin;
+        dest = stdout;
+    }    
 }
 
+template<std::size_t KeyBits>
 void encrypt(const char* src, const char* dst, const char* keyFile)
 {
     std::FILE* fpsrc = std::fopen(src, "rb");
@@ -95,6 +156,7 @@ void encrypt(const char* src, const char* dst, const char* keyFile)
     std::fclose(fpdst);
 }
 
+template<std::size_t KeyBits>
 void decrypt(const char* src, const char* dst, const char* keyFile)
 {
     std::FILE* fpsrc = std::fopen(src, "rb");

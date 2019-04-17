@@ -10,6 +10,7 @@
 #include <iostream>
 #include "biguint.hpp"
 #include "TimerGuard.h"
+#include "fullMultiply_alter.hpp"
 
 template<typename T>
 struct hasDivide
@@ -255,14 +256,15 @@ BigUInt<B2 - 32> modPowerOf2(BigUInt<B1> const& v, BigUInt<B2> const& powerOf2)
 
 // v is the value to be processed
 // modulus * x = -1(modR)
-template <std::size_t B>
+template <std::size_t B, typename Multiplier>
 BigUInt<B> REDC(BigUInt<2*B> const& v, BigUInt<B+32> const& r,
 		BigUInt<B> const& modulus, BigUInt<B+32> const& modulusExtended,
 		BigUInt<B+32> const& x)
 {
-    BigUInt<B> m = modPowerOf2(fullMultiply(modPowerOf2(v, r).template resizeMove<B+32>(), x), r);
+    Multiplier multiplier;
+    BigUInt<B> m = modPowerOf2(multiplier(modPowerOf2(v, r).template resizeMove<B+32>(), x), r);
     auto t = ((v.template resize<2*B+32>()
-               + fullMultiply(m, modulus).template resizeMove<2*B+32>())
+               + multiplier(m, modulus).template resizeMove<2*B+32>())
 	      >> B).template resizeMove<B+32>();
     
     
@@ -290,14 +292,14 @@ struct ContextOfMontgomery
     BigUInt<B + 32> y;
 };
 
-template <std::size_t B>
+template <std::size_t B, typename Multiplier = Multiplier_normal>
 BigUInt<B> modularExp_montgomery(BigUInt<B> const& base, BigUInt<B> const& exp,
 				 BigUInt<B> const& modulus, ContextOfMontgomery<B> const& context)
 {
     // the highest bit of modulus is 1, which means modulus has exactly B bits.
-
     // r, x and y are BigUInt<B+32>
     // r*y - modulus*x == 1
+    Multiplier multiplier;
     auto modulusExt = modulus.template resize<B+32>();
     // auto [r, x, y] = findR(modulusExt);
     BigUInt<B> baseMF = modLess(fullMultiply(base, context.r), modulus); // montgomery form of base
@@ -308,14 +310,14 @@ BigUInt<B> modularExp_montgomery(BigUInt<B> const& base, BigUInt<B> const& exp,
     	--bIter;
     }
     while (bIter != end) {
-	dMF = REDC<B>(fullMultiply(dMF, dMF), context.r, modulus, modulusExt, context.x);
+	dMF = REDC<B, Multiplier>(multiplier(dMF, dMF), context.r, modulus, modulusExt, context.x);
 	if (*bIter) {
-	    dMF = REDC<B>(fullMultiply(dMF, baseMF), context.r, modulus, modulusExt, context.x);
+	    dMF = REDC<B, Multiplier>(multiplier(dMF, baseMF), context.r, modulus, modulusExt, context.x);
 	}
 	--bIter;
     }
 
-    return REDC<B>(dMF.template resize<2*B>(), context.r, modulus, modulusExt, context.x);
+    return REDC<B, Multiplier>(dMF.template resize<2*B>(), context.r, modulus, modulusExt, context.x);
 }
 
 template<std::size_t B>

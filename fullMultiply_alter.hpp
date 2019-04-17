@@ -285,3 +285,19 @@ BigUInt<B * 2> fullMultiply_comba_simd(BigUInt<B> const& lhs, BigUInt<B> const& 
                             rhs.data().data(), BigUInt<B>::VLEN);
     return result;
 }
+
+struct Multiplier_comba_simd
+{
+    template<std::size_t B>
+    BigUInt<B*2> operator()(BigUInt<B> const& lhs, BigUInt<B> const& rhs) {
+        return fullMultiply_comba_simd(lhs, rhs);
+    }
+};
+
+struct Multiplier_normal
+{
+    template<std::size_t B1, std::size_t B2>
+    BigUInt<B1+B2> operator()(BigUInt<B1> const& lhs, BigUInt<B2> const& rhs) {
+        return fullMultiply(lhs, rhs);
+    }
+};

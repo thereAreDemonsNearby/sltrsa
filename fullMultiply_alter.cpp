@@ -258,3 +258,154 @@ void fullMultiply_comba_simd_impl(uint32_t* result, uint32_t const* lhs,
     }
     result[2*len - 1] = r0;
 }
+
+void fullMultiply_comba_simd_finer_impl(uint32_t* result, uint32_t const* lhs,
+                                  uint32_t const* rhs, std::size_t const len)
+{
+    constexpr uint64_t mask = 0xffffffff;
+    __m256i maskVec = _mm256_set1_epi64x(mask);
+    __m128i maskVec128 = _mm_set1_epi64x(mask);
+    uint64_t r0 = 0, r1 = 0, r2 = 0;
+    for (std::size_t k = 0; k < len; ++k) {
+        std::size_t i, j;
+        __m256i shiftedSum = _mm256_setzero_si256();
+        __m256i maskedSum = _mm256_setzero_si256();
+        __m128i shiftedSum128 = _mm_setzero_si128();
+        __m128i maskedSum128 = _mm_setzero_si128();
+        // bool simded = (3 <= k);
+        i = 0;
+        for (; i + 3 <= k; i += 4) {
+            __m256i lhsVec = _mm256_cvtepu32_epi64(
+                _mm_loadu_si128(reinterpret_cast<__m128i const*>(lhs+i))
+                );
+            __m256i rhsVec = _mm256_cvtepu32_epi64(
+                _mm_shuffle_epi32(
+                    _mm_loadu_si128(reinterpret_cast<__m128i const*>(rhs+k-i-3)),
+                    _MM_SHUFFLE(0, 1, 2, 3)
+                    )
+                );
+            __m256i prod = _mm256_mul_epu32(lhsVec, rhsVec);           
+            __m256i shifted = _mm256_srli_epi64(prod, 32);
+            __m256i masked = _mm256_and_si256(prod, maskVec);         
+            shiftedSum = _mm256_add_epi64(shifted, shiftedSum);
+            maskedSum = _mm256_add_epi64(masked, maskedSum);
+        }
+
+        for (; i + 1 <= k; i += 2) {
+            __m128i lhsVec = _mm_cvtepu32_epi64(
+                _mm_loadl_epi64(reinterpret_cast<__m128i const*>(lhs + i))
+                );
+            __m128i rhsVec = _mm_cvtepu32_epi64(
+                _mm_shuffle_epi32(
+                    _mm_loadl_epi64(reinterpret_cast<__m128i const*>(rhs+k-i-1)),
+                    _MM_SHUFFLE(3, 2, 0, 1)
+                    )
+                );
+            __m128i prod = _mm_mul_epu32(lhsVec, rhsVec);
+            __m128i shifted = _mm_srli_epi64(prod, 32);
+            __m128i masked = _mm_and_si128(prod, maskVec128);
+            shiftedSum128 = _mm_add_epi64(shifted, shiftedSum128);
+            maskedSum128 = _mm_add_epi64(masked, maskedSum128);
+        }
+        // if (simded)
+        {
+            auto pshifted = (uint64_t*) &shiftedSum;
+            auto pmasked = (uint64_t*) &maskedSum;
+            auto pshifted128 = (uint64_t*) &shiftedSum128;
+            auto pmasked128 = (uint64_t*) &maskedSum128;
+            r0 += pmasked[0] + pmasked[1] + pmasked[2] + pmasked[3] + pmasked128[0] + pmasked128[1];
+            r1 += pshifted[0] + pshifted[1] + pshifted[2] + pshifted[3] + pshifted128[0] + pshifted128[1];
+        }
+        
+        // for (; i <= k; ++i) {
+        //     j = k - i;
+        //     uint64_t prod = uint64_t(lhs[i]) * rhs[j];
+        //     r0 += (prod & mask);
+        //     r1 += (prod >> 32);
+        // }
+        if (i <= k) {
+            j = k - i;
+            uint64_t prod = uint64_t(lhs[i]) * rhs[j];
+            r0 += (prod & mask);
+            r1 += (prod >> 32);
+        }
+        r1 += (r0 >> 32);
+        r2 += (r1 >> 32);
+        result[k] = r0;
+        r0 = (r1 & mask);
+        r1 = (r2 & mask);
+        r2 = 0;
+    }
+
+    for (std::size_t k = len, l = 1; k < 2*len - 1; ++k, ++l) {
+        std::size_t i, j;
+        __m256i shiftedSum = _mm256_setzero_si256();
+        __m256i maskedSum = _mm256_setzero_si256();
+        __m128i shiftedSum128 = _mm_setzero_si128();
+        __m128i maskedSum128 = _mm_setzero_si128();
+        bool simded = (l + 3 < len);
+        i = l;
+        for (; i + 3 < len; i += 4) {
+            __m256i lhsVec = _mm256_cvtepu32_epi64(
+                _mm_lddqu_si128(reinterpret_cast<__m128i const*>(lhs+i))
+                );
+            __m256i rhsVec = _mm256_cvtepu32_epi64(
+                _mm_shuffle_epi32(
+                    _mm_lddqu_si128(reinterpret_cast<__m128i const*>(rhs+k-i-3)),
+                    _MM_SHUFFLE(0, 1, 2, 3)
+                    )
+                );
+            __m256i prod = _mm256_mul_epu32(lhsVec, rhsVec);
+            
+            // actually 32bit efficient data
+            __m256i shifted = _mm256_srli_epi64(prod, 32);
+            __m256i masked = _mm256_and_si256(prod, maskVec);
+            shiftedSum = _mm256_add_epi64(shifted, shiftedSum);
+            maskedSum = _mm256_add_epi64(masked, maskedSum);
+        }
+        for (; i + 1 < len; i += 2) {
+            __m128i lhsVec = _mm_cvtepu32_epi64(
+                _mm_loadl_epi64(reinterpret_cast<__m128i const*>(lhs+i))
+                );
+            __m128i rhsVec = _mm_cvtepu32_epi64(
+                _mm_shuffle_epi32(
+                    _mm_loadl_epi64(reinterpret_cast<__m128i const*>(rhs+k-i-1)),
+                    _MM_SHUFFLE(3, 2, 0, 1)
+                    )
+                );
+            __m128i prod = _mm_mul_epu32(lhsVec, rhsVec);
+            __m128i shifted = _mm_srli_epi64(prod, 32);
+            __m128i masked = _mm_and_si128(prod, maskVec128);
+            shiftedSum128 = _mm_add_epi64(shifted, shiftedSum128);
+            maskedSum128 = _mm_add_epi64(masked, maskedSum128);
+        }
+        // if (simded)
+        {
+            auto pshifted = (uint64_t*) &shiftedSum;
+            auto pmasked = (uint64_t*) &maskedSum;
+            auto pshifted128 = (uint64_t*) &shiftedSum128;
+            auto pmasked128 = (uint64_t*) &maskedSum128;
+            r0 += pmasked[0] + pmasked[1] + pmasked[2] + pmasked[3] + pmasked128[0] + pmasked128[1];
+            r1 += pshifted[0] + pshifted[1] + pshifted[2] + pshifted[3] + pshifted128[0] + pshifted128[1];
+        }
+        // for (; i < len; ++i) {
+        //     j = k - i;
+        //     uint64_t prod = uint64_t(lhs[i]) * rhs[j];
+        //     r0 += (prod & mask);
+        //     r1 += prod >> 32;
+        // }
+        if (i < len) {
+            j = k - i;
+            uint64_t prod = uint64_t(lhs[i]) * rhs[j];
+            r0 += (prod & mask);
+            r1 += (prod >> 32);
+        }
+        r1 += r0 >> 32;
+        r2 += r1 >> 32;
+        result[k] = r0;
+        r0 = (r1 & mask);
+        r1 = (r2 & mask);
+        r2 = 0;
+    }
+    result[2*len - 1] = r0;
+}

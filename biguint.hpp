@@ -69,6 +69,11 @@ public:
     {
         data_.resize(BITS_ / 32, 0);
     }
+    BigUInt(std::vector<uint32_t>&& dat)
+        : data_(std::move(dat))
+    {
+        assert(data_.size() == BITS_ / 32);
+    }
     self& operator= (const self& rhs) = default;
     self& operator= (self&& rhs) = default;
     self& operator= (uint64_t u) {
@@ -154,6 +159,14 @@ public:
     }
 
     // observer
+    uint32_t& operator[](std::size_t idx) {
+        return data_[idx];        
+    }
+
+    uint32_t operator[](std::size_t idx) const {
+        return data_[idx];
+    }
+    
     BigUInt<2 * BITS_> extend() const {
 	BigUInt<2 * BITS_> res;
 	for (int i = 0; i < data_.size(); ++i) {

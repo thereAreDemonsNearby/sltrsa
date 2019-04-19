@@ -1,0 +1,24 @@
+Bit length: 512 Mul times: 10000
+normal: 0.00161739
+normal simd: 0.00183394
+comba:  0.00210481
+comba simd:  0.00216058
+comba simd finer:  0.0023371
+Bit length: 1024 Mul times: 10000
+normal: 0.00691109
+normal simd: 0.0068511
+comba:  0.0057709
+comba simd:  0.00553725
+comba simd finer:  0.00609173
+Bit length: 2048 Mul times: 10000
+normal: 0.0284274
+normal simd: 0.0277982
+comba:  0.0170211
+comba simd:  0.0158715
+comba simd finer:  0.016834
+Bit length: 4096 Mul times: 10000
+normal: 0.111349
+normal simd: 0.11119
+comba:  0.0565954
+comba simd:  0.0531384
+comba simd finer:  0.0545464

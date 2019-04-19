@@ -4,7 +4,7 @@ all: sltrsa sltrsa_keygen
 sltrsa: sltrsa.cpp biguint.hpp ntalgo.hpp
 	$(CXX) -O2 -std=c++17 -o bin/sltrsa sltrsa.cpp fullMultiply_alter.cpp  -pthread -lfmt -mavx2
 sltrsa-debug: sltrsa.cpp biguint.hpp ntalgo.hpp
-	$(CXX) -g -std=c++17 -o bin/sltrsa-debug sltrsa.cpp fullMultiply_alter.cpp  -pthread -lfmt -mavx2
+	$(CXX) -Og -g -std=c++17 -o bin/sltrsa-debug sltrsa.cpp fullMultiply_alter.cpp  -pthread -lfmt -mavx2
 sltrsa_keygen: keyGen.cpp biguint.hpp ntalgo.hpp primegen.hpp
 	$(CXX) -O2 -std=c++17 -o bin/sltrsa_keygen keyGen.cpp fullMultiply_alter.cpp -pthread -lfmt -mavx2
 sltrsa_gprof: sltrsa.cpp biguint.hpp ntalgo.hpp

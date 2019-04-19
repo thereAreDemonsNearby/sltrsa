@@ -1,0 +1,10 @@
+Bit length: 16384 Mul times: 10000
+normal: 2.00834
+normal simd: 1.83861
+normal multithread with 2 cores: 1.03195
+normal multithread with 3 cores: 0.719146
+normal multithread with 4 cores: 0.561059
+normal multithread with 5 cores: 0.492934
+normal multithread with 6 cores: 0.662645
+comba:  1.79524
+comba simd:  0.751634

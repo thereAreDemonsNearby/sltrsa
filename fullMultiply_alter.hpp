@@ -286,6 +286,17 @@ BigUInt<B * 2> fullMultiply_comba_simd(BigUInt<B> const& lhs, BigUInt<B> const& 
     return result;
 }
 
+void fullMultiply_comba_simd_finer_impl(uint32_t* result, uint32_t const* lhs,
+                                  uint32_t const* rhs, std::size_t const len);
+template<std::size_t B>
+BigUInt<B * 2> fullMultiply_comba_simd_finer(BigUInt<B> const& lhs, BigUInt<B> const& rhs)
+{
+    BigUInt<B * 2> result;
+    fullMultiply_comba_simd_finer_impl(result.data().data(), lhs.data().data(),
+                            rhs.data().data(), BigUInt<B>::VLEN);
+    return result;
+}
+
 struct Multiplier_comba_simd
 {
     template<std::size_t B>

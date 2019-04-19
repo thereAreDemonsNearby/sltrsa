@@ -12,7 +12,7 @@ void correctness()
         auto a = BigUInt<B>::randomGen();
         auto b = BigUInt<B>::randomGen();
         auto res1 = fullMultiply(a, b);
-        auto res2 = fullMultiply_comba_simd(a, b);
+        auto res2 = fullMultiply_comba_simd_finer(a, b);
         if (res1 != res2) {
             fmt::print("not equal\n");
             std::exit(1);
@@ -52,17 +52,17 @@ int main()
         }
     }
 
-    for (int cores = 2; cores <= 6; ++cores)
-    {
-        auto msg = fmt::format("normal multithread with {} cores:", cores);
-        MulCtx_normal_multithrd ctx(cores);
-        {
-            TimerGuard tg(msg);
-            for (int i = 0; i < vec.size() - 1; ++i) {
-                auto res = fullMultiply_multithrd_spin(vec[i], vec[i+1], ctx);
-            }
-        }
-    }
+    // for (int cores = 2; cores <= 6; ++cores)
+    // {
+    //     auto msg = fmt::format("normal multithread with {} cores:", cores);
+    //     MulCtx_normal_multithrd ctx(cores);
+    //     {
+    //         TimerGuard tg(msg);
+    //         for (int i = 0; i < vec.size() - 1; ++i) {
+    //             auto res = fullMultiply_multithrd_spin(vec[i], vec[i+1], ctx);
+    //         }
+    //     }
+    // }
 
     {
         TimerGuard tg("comba: ");
@@ -75,6 +75,13 @@ int main()
         TimerGuard tg("comba simd: ");
         for (int i = 0; i < vec.size()-1; ++i) {
             auto res = fullMultiply_comba_simd(vec[i], vec[i+1]);
+        }
+    }
+
+    {
+        TimerGuard tg("comba simd finer: ");
+        for (int i = 0; i < vec.size()-1; ++i) {
+            auto res = fullMultiply_comba_simd_finer(vec[i], vec[i+1]);
         }
     }
 

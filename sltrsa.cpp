@@ -10,6 +10,7 @@
 #include <vector>
 #include "ntalgo.hpp"
 #include "TimerGuard.h"
+#include "ctpl.h"
 
 namespace fs = std::filesystem;
 
@@ -345,7 +346,7 @@ void decrypt_serial(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& k
 
     ContextOfMontgomery<KeyBits/2> pContext(key.p);
     ContextOfMontgomery<KeyBits/2> qContext(key.q);
-
+    
     std::size_t dstsz;
     if (std::fread(&dstsz, sizeof(std::size_t), 1, src) != 1) {
 	std::perror("cannot read the size of the original file");
@@ -354,6 +355,7 @@ void decrypt_serial(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& k
 
     std::size_t nread;
     BigUInt<CipherUnitBytes * 8> cipherBuff;
+//    TimerGuard tg("pure time:", TimerGuard::Delay{}, std::cerr);
     for (;;) {
 	cipherBuff = 0;
 	nread = std::fread(cipherBuff.data().data(), 1, CipherUnitBytes, src);
@@ -381,6 +383,7 @@ void decrypt_serial(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& k
 
 	BigUInt<CipherUnitBytes * 8> decrypted
 	    = decryptUsingChineseRemainderTheorem(cipherBuff, key, pContext, qContext);
+
 	if (std::fwrite(decrypted.data().data(), 1, nwrite, dst) != nwrite) {
 	    std::fprintf(stderr, "fwrite error\n");
 	    std::exit(3);
@@ -409,6 +412,7 @@ void decrypt_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
     std::size_t nread;
     std::size_t nbuf;
     std::vector<BigUInt<KeyBits>> buffers(threadNum - 2);
+    // ctpl::thread_pool thrdpool(threadNum);
     for (;;) {
         nbuf = 0;
         for (int i = 0; i < threadNum - 2; ++i) {
@@ -438,6 +442,9 @@ void decrypt_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
             futs[i] = std::async([i, &buffers, &key, &pContext, &qContext](){
                 return decryptUsingChineseRemainderTheorem(buffers[i], key, pContext, qContext);
             });
+            // futs[i] = thrdpool.push([i, &buffers, &key, &pContext, &qContext, &thrdpool](int id){
+            //     return decryptUsingChineseRemainderTheorem(buffers[i], key, pContext, qContext, &thrdpool);
+            // });
         }
 
         for (std::size_t i = 0; i < nbuf; ++i) {
@@ -460,6 +467,8 @@ BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
     ContextOfMontgomery<KeyBits/2> const& pContext,
     ContextOfMontgomery<KeyBits/2> const& qContext)
 {
+    // TimerGuard tg("chineseremainder all:");
+    // TimerGuard tg2("chineseremainder pure:", TimerGuard::Delay{});
     if (parallel) {
         BigUInt<KeyBits/2> m1, m2;
         auto fut1 = std::async([&cipher, &key, &pContext, &m1](){
@@ -486,8 +495,8 @@ BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
         auto m1 = modularExp_montgomery(cipher1, d1, key.p, pContext);
         auto cipher2 = modLess(cipher, key.q);
         auto d2 = modLess(key.d, key.q - 1);
+        // fmt::print("1s in d1: {0}\n1s in d2: {1}\n", count1(d1), count1(d2));
         auto m2 = modularExp_montgomery(cipher2, d2, key.q, qContext);
-
         auto m = fullMultiply(fullMultiply(m1, key.q), key.qInv.template resize<KeyBits>())
             + fullMultiply(fullMultiply(m2, key.p), key.pInv.template resize<KeyBits>());
         return modLess(m, key.n);

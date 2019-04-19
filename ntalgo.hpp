@@ -102,6 +102,20 @@ public:
 };
 
 template<typename Int>
+std::size_t count1(Int const& i)
+{
+    BitIterator<Int> iter(i);
+    BitIterator<Int> end = BitIterator<Int>::end();
+    std::size_t cnt = 0;
+    while (iter != end) {
+        if (*iter)
+            cnt++;
+        ++iter;
+    }
+    return cnt;
+}
+
+template<typename Int>
 struct Width
 {
     constexpr int operator()() {
@@ -243,26 +257,26 @@ findR(BigUInt<B> const& modulusExtended)
 }
 
 template <std::size_t B1, std::size_t B2>
-BigUInt<B2 - 32> modPowerOf2(BigUInt<B1> const& v, BigUInt<B2> const& powerOf2)
+BigUInt<B2 - 32> modPowerOf2(BigUInt<B1> v, BigUInt<B2> const& powerOf2)
 {
     static_assert(B1 >= B2);
     assert(powerOf2.data().back() == 1);
-    BigUInt<B2 - 32> ret{};
-    for (std::size_t i = 0; i < BigUInt<B2 - 32>::VLEN; ++i) {
-	ret.data()[i] = v.data()[i];
-    }
+    BigUInt<B2 - 32> ret{std::move(v).template resizeMove<B2-32>()};
+    // for (std::size_t i = 0; i < BigUInt<B2 - 32>::VLEN; ++i) {
+    //     ret.data()[i] = v.data()[i];
+    // }
     return ret;
 }
 
 // v is the value to be processed
-// modulus * x = -1(modR)
+// modulus * x = -1(mod R)
 template <std::size_t B, typename Multiplier>
 BigUInt<B> REDC(BigUInt<2*B> const& v, BigUInt<B+32> const& r,
 		BigUInt<B> const& modulus, BigUInt<B+32> const& modulusExtended,
-		BigUInt<B+32> const& x)
+		BigUInt<B> const& x)
 {
     Multiplier multiplier;
-    BigUInt<B> m = modPowerOf2(multiplier(modPowerOf2(v, r).template resizeMove<B+32>(), x), r);
+    BigUInt<B> m = modPowerOf2(multiplier(modPowerOf2(v, r), x), r);
     auto t = ((v.template resize<2*B+32>()
                + multiplier(m, modulus).template resizeMove<2*B+32>())
 	      >> B).template resizeMove<B+32>();
@@ -282,14 +296,14 @@ struct ContextOfMontgomery
     {
 	auto tup = findR(modulus.template resize<B + 32>());
 	r = std::move(std::get<0>(tup));
-	x = std::move(std::get<1>(tup));
-	y = std::move(std::get<2>(tup));
+	x = BigUInt<B>(std::move(std::get<1>(tup)));
+	y = BigUInt<B>(std::move(std::get<2>(tup)));
     }
 
     // r * y - modulus * x = 1;
     BigUInt<B + 32> r;
-    BigUInt<B + 32> x;
-    BigUInt<B + 32> y;
+    BigUInt<B> x;
+    BigUInt<B> y;
 };
 
 template <std::size_t B, typename Multiplier = Multiplier_normal>

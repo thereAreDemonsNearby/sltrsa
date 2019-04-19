@@ -140,6 +140,7 @@ void keyGen(char const* pub, char const* priv)
                    "----q----", q.toDec(),
                    "----pInv----", pInv.toDec(),
                    "----qInv----", qInv.toDec());
+        // fmt::print("1s in d: {}\n", count1(d));
 	std::fclose(pubk);
 	std::fclose(prik);
     }

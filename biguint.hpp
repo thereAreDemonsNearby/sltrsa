@@ -39,8 +39,9 @@ public:
 	return result;
     }
 
-    static self fromHex(const std::string& hexString) {
+    static self fromHex(const std::string& hexString) {        
         auto toNum = [](char ch) {
+            ch = std::tolower(ch);
             if (ch >= '0' && ch <= '9') {
                 return ch - '0';
             } else if (ch >= 'a' && ch <= 'f') {

@@ -1,6 +1,6 @@
 #include <fmt/format.h>
 #include "../ntalgo.hpp"
-#include "../MontProd_alter.hpp"
+#include "../MontMul_alter.hpp"
 #include "../TimerGuard.h"
 #include "../primegen.hpp"
 
@@ -29,7 +29,7 @@ void test()
     {
         TimerGuard tg("modexp cios:");
         for (int i = 0; i < 100; ++i)
-            res2 = modularExp_montgomery_alter<B, MontProder_cios>(base, exp, n, montCtx);
+            res2 = modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, n, montCtx);
     }
 
     // if (res1 != res2) {

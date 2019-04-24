@@ -111,12 +111,13 @@ int main()
 	p = primeGen_par<PrimeBits>(4);
 	q = primeGen_par<PrimeBits>(4);
     }
-    auto pInv = modInverse(p, q);
-    auto qInv = modInverse(q, p);
+    BigUInt<PrimeBits> pInv, qInv;
+    modInverse(p, q, pInv);
+    modInverse(q, p, qInv);
     auto n = fullMultiply(p, q);
-    BigUInt<2 * PrimeBits> e = 65537;
+    BigUInt<2 * PrimeBits> e = 65537, d;
     auto phiN = fullMultiply(p - 1, q - 1);
-    auto d = modInverse(e, phiN);
+    modInverse(e, phiN, d);
     std::cout << "1: " << (fullMultiply(e, d) % phiN.extend()).toDec() << '\n';
     std::cout << "1: " << (fullMultiply(p, pInv) % q.extend()).toDec() << '\n';
     std::cout << "1: " << (fullMultiply(q, qInv) % p.extend()).toDec() << '\n'; /// here is the problem

@@ -101,6 +101,12 @@ public:
     self& operator<<= (std::size_t off);
     self operator>> (std::size_t off);
     self& operator>>= (std::size_t off);
+    self operator& (const self& rhs) const {
+        self ret;
+        for (std::size_t i = 0; i < VLEN; ++i)
+            ret[i] = data_[i] & rhs[i];
+        return ret;
+    }
     
 
     self divide(const self& rhs); // do divide in-place.

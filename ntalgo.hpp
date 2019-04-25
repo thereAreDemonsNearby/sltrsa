@@ -298,10 +298,12 @@ struct ContextOfMontgomery
 	r = std::move(std::get<0>(tup));
 	x = BigUInt<B>(std::move(std::get<1>(tup)));
 	y = BigUInt<B>(std::move(std::get<2>(tup)));
+        rr = modLess(fullMultiply_comba_simd(r, r), modulus);
     }
 
     // r * y - modulus * x = 1;
     BigUInt<B + 32> r;
+    BigUInt<B> rr; // r^2 mod modulus
     BigUInt<B> x;
     BigUInt<B> y;
 };
@@ -316,8 +318,12 @@ BigUInt<B> modularExp_montgomery(BigUInt<B> const& base, BigUInt<B> const& exp,
     Multiplier multiplier;
     auto modulusExt = modulus.template resize<B+32>();
     // auto [r, x, y] = findR(modulusExt);
-    BigUInt<B> baseMF = modLess(fullMultiply(base, context.r), modulus); // montgomery form of base
-    BigUInt<B> dMF = modLess(context.r, modulus); // d is 1, whose mf is 1 * r mod N
+    // BigUInt<B> baseMF = modLess(fullMultiply(base, context.r), modulus); // montgomery form of baseMF
+    BigUInt<B> baseMF = REDC<B, Multiplier>(multiplier(base, context.rr),
+                                            context.r, modulus, modulusExt, context.x);
+    // BigUInt<B> dMF = modLess(context.r, modulus); // d is 1, whose mf is 1 * r mod N
+    BigUInt<B> dMF = REDC<B, Multiplier>(multiplier(BigUInt<B>(1), context.rr),
+                                         context.r, modulus, modulusExt, context.x);
     BitIterator<BigUInt<B>> bIter{exp, BigUInt<B>::BITS - 1};
     auto end = BitIterator<BigUInt<B>>::beforeBegin();
     while (!(*bIter)) {

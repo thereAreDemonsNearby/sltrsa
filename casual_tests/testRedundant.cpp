@@ -33,13 +33,20 @@ void test0()
 int main()
 {
     constexpr std::size_t B = 1024;
-    auto modulus = BigUInt<B>::randomGenOdd();
+    auto modulus = BigUInt<B>::randomGenOdd();    
     ContextOfMontgomery<B> mctx(modulus);
     GNKCtx<B> gkctx(modulus);
     auto base = BigUInt<B>::randomGen();
     auto exp = BigUInt<B>::randomGen();
-    // BigUInt<B> exp = 65537;
     BigUInt<B> res1, res2;
+    {
+        TimerGuard tg("normal");
+        modularExp_montgomery(base, exp, modulus, mctx);
+    }
+    {
+        TimerGuard tg("comba simd");
+        modularExp_montgomery<B, Multiplier_comba_simd>(base, exp, modulus, mctx);
+    }
     {
         TimerGuard tg("cios");
         res1 = modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, modulus, mctx);
@@ -51,6 +58,8 @@ int main()
     }
     if (res1 != res2) {
         fmt::print("error\nres1={0}\nres2={1}\n", res1.toHex(), res2.toHex());
+    } else {
+        fmt::print("equal\n");
     }
 }
 

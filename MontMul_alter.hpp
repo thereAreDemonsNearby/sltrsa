@@ -108,14 +108,18 @@ struct GNKCtx
 private:
     static constexpr uint32_t GNKRadix(std::size_t b)
     {
-        if (b < 1024) return 29;
-        else return 28;
+        if (b <= 1024)
+            return 29;
+        else
+            return 28;
     }
 
     static constexpr uint32_t GNKMask(std::size_t b)
     {
-        if (b < 1024) return 0x1fffffff;
-        else return 0xfffffff;
+        if (b <= 1024)
+            return 0x1fffffff;
+        else
+            return 0xfffffff;
     }
 
 public:
@@ -132,6 +136,14 @@ public:
 
     GNKCtx(BigUInt<B> const& modulus);    
 };
+
+inline void printRedundantForm(std::vector<uint64_t> const& rf)
+{
+    for (auto it = rf.rbegin(); it != rf.rend(); ++it) {
+        fmt::print("{:x}|", *it);
+    }
+    fmt::print("\n");
+}
 
 template<std::size_t B>
 std::vector<uint64_t> toRedundantForm(BigUInt<B> const& orig, uint32_t radix, uint32_t mask);
@@ -165,6 +177,7 @@ std::vector<uint64_t> montMul_GNK(std::vector<uint64_t>& lhs, std::vector<uint64
     modulus.resize(len, 0);
     __m256i lhsVec[vecLen];
     __m256i modVec[vecLen];
+    __m256i resVec[vecLen];
     std::vector<uint64_t> result(len, 0);
     uint64_t lhs0 = lhs[0];
     uint64_t mod0 = modulus[0];
@@ -181,18 +194,16 @@ std::vector<uint64_t> montMul_GNK(std::vector<uint64_t>& lhs, std::vector<uint64
         result[0] += lhs0 * rhs[i];
         __m256i b = _mm256_set1_epi64x(rhs[i]);
         for (std::size_t j = 0; j < vecLen; ++j) {
-            __m256i res = _mm256_loadu_si256(reinterpret_cast<__m256i*>(result.data() + 1 + 4*j));
-            res = _mm256_add_epi64(res, _mm256_mul_epu32(b, lhsVec[j]));
-            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.data() + 1 + 4*j), res);
+            resVec[j] = _mm256_loadu_si256(reinterpret_cast<__m256i*>(result.data() + 1 + 4*j));
+            resVec[j] = _mm256_add_epi64(resVec[j], _mm256_mul_epu32(b, lhsVec[j]));
         }
 
         uint64_t m = ((result[0] & GNKCtx<B>::mask) * x0) & GNKCtx<B>::mask;
         result[0] += m * mod0;
         b = _mm256_set1_epi64x(m);
         for (std::size_t j = 0; j < vecLen; ++j) {
-            __m256i res = _mm256_loadu_si256(reinterpret_cast<__m256i*>(result.data() + 1 + 4*j));
-            res = _mm256_add_epi64(res, _mm256_mul_epu32(b, modVec[j]));
-            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.data() + 1 + 4*j), res);
+            resVec[j] = _mm256_add_epi64(resVec[j], _mm256_mul_epu32(b, modVec[j]));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.data() + 1 + 4*j), resVec[j]);
         }
 
         result[0] >>= GNKCtx<B>::radix;
@@ -205,7 +216,9 @@ std::vector<uint64_t> montMul_GNK(std::vector<uint64_t>& lhs, std::vector<uint64
 
         addCounter += 2;
         if (addCounter >= addLimit) {
+            // result.resize(origLen);
             normalizeRedundantForm(result, GNKCtx<B>::radix, GNKCtx<B>::mask);
+            // result.resize(len,0);
             addCounter = 0;
         }
     }
@@ -225,6 +238,8 @@ BigUInt<B> modularExp_GNK(BigUInt<B> const& base, BigUInt<B> const& exp,
     std::vector<uint64_t> baseRF = toRedundantForm(base, GNKCtx<B>::radix, GNKCtx<B>::mask); // base in redundant form
     std::vector<uint64_t> modulusRF = toRedundantForm(modulus, GNKCtx<B>::radix, GNKCtx<B>::mask);
     std::vector<uint64_t> rrRF = toRedundantForm(ctx.rr, GNKCtx<B>::radix, GNKCtx<B>::mask); // 2^(2*k*radix) mod m in rf
+    // printRedundantForm(baseRF); printRedundantForm(modulusRF);
+    // printRedundantForm(rrRF); fmt::print("rr:{}\n", ctx.rr.toDec());
 
     std::vector<uint64_t> one(baseRF.size(), 0);
     one[0] = 1;
@@ -243,7 +258,6 @@ BigUInt<B> modularExp_GNK(BigUInt<B> const& base, BigUInt<B> const& exp,
 	}
 	--bIter;
     }
-
     // convert from montgomery form to the original form
     resultRFMF = montMul_GNK(resultRFMF, one, modulusRF, ctx);
     return redundantFormToBase32<B>(resultRFMF, GNKCtx<B>::radix);
@@ -282,6 +296,7 @@ std::vector<uint64_t> toRedundantForm(BigUInt<B> const& orig, uint32_t radix, ui
             bitUsed += radix;
         } else {
             ++origIdx;
+            if (origIdx >= BigUInt<B>::VLEN) break;
             auto more = radix - bitLeft;
             rf[i] |= (orig[origIdx] << bitLeft) & mask;
             bitUsed = more;
@@ -306,11 +321,13 @@ BigUInt<B> redundantFormToBase32(std::vector<uint64_t> const& rf, uint32_t radix
         auto bitLeft = radix - bitUsed;
         ret[i] = (rf[rfIdx] >> bitUsed) & m;        
         ++rfIdx;
+        if (rfIdx >= rf.size()) break;
         need -= bitLeft;
         if (need >= radix) {
             ret[i] |= (rf[rfIdx] << (32 - need)) & m;
             need -= radix;
             ++rfIdx;
+            if (rfIdx >= rf.size()) break;
             if (need > 0) {
                 ret[i] |= (rf[rfIdx] << (32 - need)) & m;
                 bitUsed = need;

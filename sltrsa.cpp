@@ -10,7 +10,7 @@
 #include <vector>
 #include "ntalgo.hpp"
 #include "TimerGuard.h"
-#include "ctpl.h"
+#include "MontMul_alter.hpp"
 
 namespace fs = std::filesystem;
 
@@ -30,6 +30,8 @@ struct PrivateKey
     BigUInt<KeyBits/2> q;
     BigUInt<KeyBits/2> pInv;
     BigUInt<KeyBits/2> qInv;
+    BigUInt<KeyBits/2> d1;
+    BigUInt<KeyBits/2> d2;
 };
 
 static bool toNumber(char const* str, std::size_t* n)
@@ -70,8 +72,9 @@ void decrypt_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
 template<std::size_t KeyBits>
 BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
     BigUInt<KeyBits> const& cipher, PrivateKey<KeyBits> const& key,
-    ContextOfMontgomery<KeyBits/2> const& pContext,
-    ContextOfMontgomery<KeyBits/2> const& qContext);
+    GNKCtx<KeyBits/2> const& pContext,
+    GNKCtx<KeyBits/2> const& qContext,
+    bool par = false);
 
 
 template<std::size_t KeyBits>
@@ -105,6 +108,10 @@ PrivateKey<KeyBits> readPrivateKey(std::ifstream& ifs)
     pk.pInv = BigUInt<KeyBits/2>::fromDec(buf);
     std::getline(ifs, buf);    std::getline(ifs, buf);
     pk.qInv = BigUInt<KeyBits/2>::fromDec(buf);
+    std::getline(ifs, buf);    std::getline(ifs, buf);
+    pk.d1 = BigUInt<KeyBits/2>::fromDec(buf);
+    std::getline(ifs, buf);    std::getline(ifs, buf);
+    pk.d2 = BigUInt<KeyBits/2>::fromDec(buf);
     return pk;
 }
 
@@ -240,8 +247,9 @@ void encrypt(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& key)
 template<std::size_t KeyBits>
 void encrypt_serial(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& key)
 {
-    const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
+    // const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
     const std::size_t CipherUnitBytes = KeyBits / 8;
+    const std::size_t PlainUnitBytes = CipherUnitBytes - 1;
     ContextOfMontgomery<KeyBits> context(key.n);
     
     std::size_t srcsz = fileSize(src);
@@ -277,8 +285,9 @@ void encrypt_serial(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& ke
 template<std::size_t KeyBits>
 void encrypt_par(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& key)
 {
-    const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
+    //const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
     const std::size_t CipherUnitBytes = KeyBits / 8;
+    const std::size_t PlainUnitBytes = CipherUnitBytes - 1;
     ContextOfMontgomery<KeyBits> context(key.n);
     
     std::size_t srcsz = fileSize(src);
@@ -341,11 +350,13 @@ void decrypt(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
 template<std::size_t KeyBits>
 void decrypt_serial(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
 {
-    const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
+    // const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
     const std::size_t CipherUnitBytes = KeyBits / 8;
-
-    ContextOfMontgomery<KeyBits/2> pContext(key.p);
-    ContextOfMontgomery<KeyBits/2> qContext(key.q);
+    const std::size_t PlainUnitBytes = CipherUnitBytes - 1;
+    // ContextOfMontgomery<KeyBits/2> pContext(key.p);
+    // ContextOfMontgomery<KeyBits/2> qContext(key.q);
+    GNKCtx<KeyBits/2> pContext(key.p);
+    GNKCtx<KeyBits/2> qContext(key.q);
     
     std::size_t dstsz;
     if (std::fread(&dstsz, sizeof(std::size_t), 1, src) != 1) {
@@ -397,11 +408,12 @@ void decrypt_serial(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& k
 template<std::size_t KeyBits>
 void decrypt_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
 {
-    const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
+    // const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
     const std::size_t CipherUnitBytes = KeyBits / 8;
+    const std::size_t PlainUnitBytes = CipherUnitBytes - 1;
 
-    ContextOfMontgomery<KeyBits/2> pContext(key.p);
-    ContextOfMontgomery<KeyBits/2> qContext(key.q);
+    GNKCtx<KeyBits/2> pContext(key.p);
+    GNKCtx<KeyBits/2> qContext(key.q);
 
     std::size_t dstsz;
     if (std::fread(&dstsz, sizeof(std::size_t), 1, src) != 1) {
@@ -411,11 +423,11 @@ void decrypt_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
 
     std::size_t nread;
     std::size_t nbuf;
-    std::vector<BigUInt<KeyBits>> buffers(threadNum - 2);
+    std::vector<BigUInt<KeyBits>> buffers(threadNum);
     // ctpl::thread_pool thrdpool(threadNum);
     for (;;) {
         nbuf = 0;
-        for (int i = 0; i < threadNum - 2; ++i) {
+        for (int i = 0; i < buffers.size(); ++i) {
             buffers[i] = 0;
             nread = std::fread(buffers[i].data().data(), 1, CipherUnitBytes, src);
             if (nread < CipherUnitBytes) {
@@ -464,25 +476,23 @@ void decrypt_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
 template<std::size_t KeyBits>
 BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
     BigUInt<KeyBits> const& cipher, PrivateKey<KeyBits> const& key,
-    ContextOfMontgomery<KeyBits/2> const& pContext,
-    ContextOfMontgomery<KeyBits/2> const& qContext)
+    GNKCtx<KeyBits/2> const& pContext,
+    GNKCtx<KeyBits/2> const& qContext, bool par)
 {
     // TimerGuard tg("chineseremainder all:");
     // TimerGuard tg2("chineseremainder pure:", TimerGuard::Delay{});
-    if (parallel) {
+    if (par) {
         BigUInt<KeyBits/2> m1, m2;
         auto fut1 = std::async([&cipher, &key, &pContext, &m1](){
-            auto cipher1 = modLess(cipher, key.p);
-            auto d1 = modLess(key.d, key.p - 1);
-            m1 = modularExp_montgomery<KeyBits/2, Multiplier_comba_simd>
-                (cipher1, d1, key.p, pContext);
+            auto cipher1 = modLess(cipher, key.p);          
+            m1 = modularExp_GNK
+                (cipher1, key.d1, key.p, pContext);
         });
 
         auto fut2 = std::async([&cipher, &key, &qContext, &m2](){
             auto cipher2 = modLess(cipher, key.q);
-            auto d2 = modLess(key.d, key.q - 1);
-            m2 = modularExp_montgomery<KeyBits/2, Multiplier_comba_simd>
-                (cipher2, d2, key.q, qContext);
+            m2 = modularExp_GNK
+                (cipher2, key.d2, key.q, qContext);
         });
         fut1.wait();
         fut2.wait();
@@ -491,12 +501,10 @@ BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
         return modLess(m, key.n);
     } else {
         auto cipher1 = modLess(cipher, key.p);
-        auto d1 = modLess(key.d, key.p - 1);
-        auto m1 = modularExp_montgomery(cipher1, d1, key.p, pContext);
+        auto m1 = modularExp_GNK(cipher1, key.d1, key.p, pContext);
         auto cipher2 = modLess(cipher, key.q);
-        auto d2 = modLess(key.d, key.q - 1);
         // fmt::print("1s in d1: {0}\n1s in d2: {1}\n", count1(d1), count1(d2));
-        auto m2 = modularExp_montgomery(cipher2, d2, key.q, qContext);
+        auto m2 = modularExp_GNK(cipher2, key.d2, key.q, qContext);
         auto m = fullMultiply(fullMultiply(m1, key.q), key.qInv.template resize<KeyBits>())
             + fullMultiply(fullMultiply(m2, key.p), key.pInv.template resize<KeyBits>());
         return modLess(m, key.n);

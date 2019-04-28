@@ -34,6 +34,7 @@ int main(int argc, char** argv)
 {
     using namespace fmt::literals;
 
+    char pubKeyNameBuf[128];
     char const* pubKeyFile;
     char const* privKeyFile;
     std::size_t keyLen = 2048;
@@ -52,15 +53,17 @@ int main(int argc, char** argv)
             std::exit(1);
         }        
     } else if (idx < argc && std::strcmp(argv[idx], "--help") == 0) {
-        fmt::print(stderr, "usage: {} [-l 1024|2048|4096] <public key> <private key>\n", argv[0]);
+        fmt::print(stderr, "usage: {} [-l 1024|2048|4096] <key name>\n", argv[0]);
         std::exit(1);
     }
 
-    if (idx < argc && idx + 2 == argc) {
-        pubKeyFile = argv[idx];
-        privKeyFile = argv[idx + 1];
+    if (idx < argc && idx + 1 == argc) {
+        privKeyFile = argv[idx];
+        std::strcpy(pubKeyNameBuf, privKeyFile);
+        std::strcat(pubKeyNameBuf, ".pub");
+        pubKeyFile = pubKeyNameBuf;
     } else {
-        fmt::print(stderr, "usage: {} [-l 1024|2048|4096] <public key> <private key>\n", argv[0]);
+        fmt::print(stderr, "usage: {} [-l 1024|2048|4096] <key name>\n", argv[0]);
         std::exit(1);
     }
 
@@ -109,6 +112,9 @@ void keyGen(char const* pub, char const* priv)
 	modInverse(p, q, pInv);
 	modInverse(q, p, qInv);
 
+        BigUInt<PrimeBits> d1 = modLess(d, p - 1);
+        BigUInt<PrimeBits> d2 = modLess(d, q - 1);
+
 	std::FILE* pubk;
 	std::FILE* prik;
 
@@ -130,16 +136,19 @@ void keyGen(char const* pub, char const* priv)
                    "----e----", e.toDec(),
                    "----n----", n.toDec());
 
-        // d n p q pInv qInv
+        // d n p q pInv qInv d%(p-1) d%(q-1)
         fmt::print(prik, "----SLTRSA-{0}----\n----PrivateKey----\n"
-                   "{1}\n{2}\n{3}\n{4}\n{5}\n{6}\n{7}\n{8}\n{9}\n{10}\n{11}\n{12}\n",
+                   "{1}\n{2}\n{3}\n{4}\n{5}\n{6}\n{7}\n{8}\n{9}\n{10}\n{11}\n{12}\n"
+                   "{13}\n{14}\n{15}\n{16}\n",
                    2*PrimeBits,
                    "----d----", d.toDec(),
                    "----n----", n.toDec(),
                    "----p----", p.toDec(),
                    "----q----", q.toDec(),
                    "----pInv----", pInv.toDec(),
-                   "----qInv----", qInv.toDec());
+                   "----qInv----", qInv.toDec(),
+                   "----d1----", d1.toDec(),
+                   "----d2----", d2.toDec());
         // fmt::print("1s in d: {}\n", count1(d));
 	std::fclose(pubk);
 	std::fclose(prik);

@@ -1,38 +1,11 @@
 #include <fmt/format.h>
-#include <iostream>
 #include <fstream>
 #include <cstdlib>
 #include <utility>
 #include <cstring>
-#include <future>
-#include <filesystem>
 #include <string>
-#include <vector>
-#include "ntalgo.hpp"
 #include "TimerGuard.h"
-#include "MontMul_alter.hpp"
-
-namespace fs = std::filesystem;
-
-template<std::size_t KeyBits>
-struct PublicKey
-{
-    BigUInt<KeyBits> e;
-    BigUInt<KeyBits> n;
-};
-
-template<std::size_t KeyBits>
-struct PrivateKey
-{
-    BigUInt<KeyBits> d;
-    BigUInt<KeyBits> n;
-    BigUInt<KeyBits/2> p;
-    BigUInt<KeyBits/2> q;
-    BigUInt<KeyBits/2> pInv;
-    BigUInt<KeyBits/2> qInv;
-    BigUInt<KeyBits/2> d1;
-    BigUInt<KeyBits/2> d2;
-};
+#include "core.hpp"
 
 static bool toNumber(char const* str, std::size_t* n)
 {
@@ -54,27 +27,6 @@ static std::size_t fileSize(std::FILE* fp)
 
     return size;
 }
-
-template<std::size_t KeyBits>
-void encrypt(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& key);
-template<std::size_t KeyBits>
-void encrypt_serial(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& key);
-template<std::size_t KeyBits>
-void encrypt_par(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& key);
-
-template<std::size_t KeyBits>
-void decrypt(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key);
-template<std::size_t KeyBits>
-void decrypt_serial(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key);
-template<std::size_t KeyBits>
-void decrypt_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key);
-
-template<std::size_t KeyBits>
-BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
-    BigUInt<KeyBits> const& cipher, PrivateKey<KeyBits> const& key,
-    GNKCtx<KeyBits/2> const& pContext,
-    GNKCtx<KeyBits/2> const& qContext,
-    bool par = false);
 
 
 template<std::size_t KeyBits>
@@ -115,8 +67,8 @@ PrivateKey<KeyBits> readPrivateKey(std::ifstream& ifs)
     return pk;
 }
 
-static bool parallel = false;
-static int threadNum = 1;
+static bool Parallel = false;
+static int ThreadNum = 1;
 
 int main(int argc, char* argv[])
 {
@@ -128,25 +80,25 @@ int main(int argc, char* argv[])
     
     std::size_t idx = 1;
     if (idx < argc && std::strcmp(argv[idx], "--help") == 0) {
-        fmt::print(stderr, "{} [-p threadNum] <key> [src] [dest]\n", argv[0]);
+        fmt::print(stderr, "{} [-p ThreadNum] <key> [src] [dest]\n", argv[0]);
         std::exit(0);
     }
     
     if (idx < argc && std::strcmp(argv[idx], "-p") == 0) {
-        // enable parallel
+        // enable Parallel
         ++idx;
-        parallel = true;
+        Parallel = true;
         // read thread num
         std::size_t tn;
         if (idx < argc && toNumber(argv[idx], &tn)) {
             ++idx;
-            threadNum = static_cast<int>(tn);            
+            ThreadNum = static_cast<int>(tn);            
         } else {
             fmt::print(stderr, "lack thread number after -p\n");
             std::exit(1);
         }
     } else {
-        parallel = false;
+        Parallel = false;
     }
     
     if (idx < argc) {
@@ -207,26 +159,26 @@ int main(int argc, char* argv[])
     if (line == "----PublicKey----") {
         if (keyBits == 1024) {
             auto pk = readPublicKey<1024>(keyFile);
-            encrypt<1024>(src, dst, pk);
+            rsa::encryptFile<1024>(src, dst, pk, ThreadNum);
         } else if (keyBits == 2048) {
             auto pk = readPublicKey<2048>(keyFile);
-            encrypt<2048>(src, dst, pk);
+            rsa::encryptFile<2048>(src, dst, pk, ThreadNum);
         } else {
             assert(keyBits == 4096);
             auto pk = readPublicKey<4096>(keyFile);
-            encrypt<4096>(src, dst, pk);
+            rsa::encryptFile<4096>(src, dst, pk, ThreadNum);
         }
     } else if (line == "----PrivateKey----") {
         if (keyBits == 1024) {
             auto pk = readPrivateKey<1024>(keyFile);
-            decrypt<1024>(src, dst, pk);
+            rsa::decryptFile<1024>(src, dst, pk, ThreadNum);
         } else if (keyBits == 2048) {
             auto pk = readPrivateKey<2048>(keyFile);
-            decrypt<2048>(src, dst, pk);
+            rsa::decryptFile<2048>(src, dst, pk, ThreadNum);
         } else {
             assert(keyBits == 4096);
             auto pk = readPrivateKey<4096>(keyFile);
-            decrypt<4096>(src, dst, pk);
+            rsa::decryptFile<4096>(src, dst, pk, ThreadNum);
         }
     } else {
         fmt::print(stderr, "Unknown key type\n");
@@ -234,279 +186,3 @@ int main(int argc, char* argv[])
     }
 }
 
-template<std::size_t KeyBits>
-void encrypt(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& key)
-{
-    if (parallel) {
-        encrypt_par(src, dst, key);
-    } else {
-        encrypt_serial(src, dst, key);
-    }
-}
-
-template<std::size_t KeyBits>
-void encrypt_serial(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& key)
-{
-    // const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
-    const std::size_t CipherUnitBytes = KeyBits / 8;
-    const std::size_t PlainUnitBytes = CipherUnitBytes - 1;
-    ContextOfMontgomery<KeyBits> context(key.n);
-    
-    std::size_t srcsz = fileSize(src);
-    std::fwrite(&srcsz, sizeof(srcsz), 1, dst);
-    
-    std::size_t nread;
-    BigUInt<CipherUnitBytes * 8> plainBuff;
-    for (;;) {
-	plainBuff = 0;
-	nread = std::fread(plainBuff.data().data(), 1, PlainUnitBytes, src);
-	if (nread < PlainUnitBytes) {
-	    if (std::ferror(src)) {
-		std::fprintf(stderr, "fread error\n");
-		std::exit(2);
-	    } else {
-		if (nread == 0)
-		    break;
-	    }
-	}
-
-	auto encrypted = modularExp_montgomery(plainBuff, key.e, key.n, context);
-	if (std::fwrite(encrypted.data().data(), 1, CipherUnitBytes, dst) != CipherUnitBytes) {
-	    std::fprintf(stderr, "fwrite error\n");
-	    std::exit(2);
-	}
-    }
-
-    std::fclose(src);
-    std::fclose(dst);
-}
-
-
-template<std::size_t KeyBits>
-void encrypt_par(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& key)
-{
-    //const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
-    const std::size_t CipherUnitBytes = KeyBits / 8;
-    const std::size_t PlainUnitBytes = CipherUnitBytes - 1;
-    ContextOfMontgomery<KeyBits> context(key.n);
-    
-    std::size_t srcsz = fileSize(src);
-    std::fwrite(&srcsz, sizeof(srcsz), 1, dst);
-    
-    std::size_t nread;
-    std::size_t nbuf = 0;
-    std::vector<BigUInt<KeyBits>> buffers(threadNum);
-    
-    for (;;) {
-        nbuf = 0;
-        for (std::size_t i = 0; i < threadNum; ++i) {
-            buffers[i] = 0;
-            nread = std::fread(buffers[i].data().data(), 1, PlainUnitBytes, src);
-            if (std::ferror(src)) {
-                std::perror("fread error");
-                std::exit(8);
-            } else {
-                if (nread == 0)
-                    break;
-            }
-            nbuf += 1;
-        }
-
-        if (nbuf == 0) {
-            break;
-        }
-
-        std::vector<std::future<BigUInt<KeyBits>>> futs(nbuf);        
-        for (std::size_t i = 0; i < futs.size(); ++i) {
-            futs[i] = std::async([i, &buffers, &key, &context](){
-                return modularExp_montgomery<KeyBits, Multiplier_comba_simd>
-                    (buffers[i], key.e, key.n, context);
-            });
-        }
-
-        for (std::size_t i = 0; i < futs.size(); ++i) {
-            if (std::fwrite(futs[i].get().data().data(), 1, CipherUnitBytes, dst)
-                != CipherUnitBytes) {
-                std::perror("fwrite error");
-                std::exit(9);
-            }
-        }
-    }
-
-    std::fclose(src);
-    std::fclose(dst);
-}
-
-template<std::size_t KeyBits>
-void decrypt(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
-{
-    if (parallel) {
-        decrypt_par(src, dst, key);
-    } else {
-        decrypt_serial(src, dst, key);
-    }
-}
-
-template<std::size_t KeyBits>
-void decrypt_serial(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
-{
-    // const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
-    const std::size_t CipherUnitBytes = KeyBits / 8;
-    const std::size_t PlainUnitBytes = CipherUnitBytes - 1;
-    // ContextOfMontgomery<KeyBits/2> pContext(key.p);
-    // ContextOfMontgomery<KeyBits/2> qContext(key.q);
-    GNKCtx<KeyBits/2> pContext(key.p);
-    GNKCtx<KeyBits/2> qContext(key.q);
-    
-    std::size_t dstsz;
-    if (std::fread(&dstsz, sizeof(std::size_t), 1, src) != 1) {
-	std::perror("cannot read the size of the original file");
-	std::exit(3);
-    }
-
-    std::size_t nread;
-    BigUInt<CipherUnitBytes * 8> cipherBuff;
-//    TimerGuard tg("pure time:", TimerGuard::Delay{}, std::cerr);
-    for (;;) {
-	cipherBuff = 0;
-	nread = std::fread(cipherBuff.data().data(), 1, CipherUnitBytes, src);
-	if (nread < CipherUnitBytes) {
-	    if (std::ferror(src)) {
-		std::fprintf(stderr, "fread error\n");
-		std::exit(3);
-	    } else {
-		if (nread == 0)
-		    break;
-		else {
-		    std::fprintf(stderr, "format error\n");
-		    std::exit(3);
-		}
-	    }
-	}
-
-	std::size_t nwrite;
-	if (dstsz >= PlainUnitBytes) {
-	    nwrite = PlainUnitBytes;
-	} else {
-	    nwrite = dstsz;
-	}
-	dstsz -= nwrite;
-
-	BigUInt<CipherUnitBytes * 8> decrypted
-	    = decryptUsingChineseRemainderTheorem(cipherBuff, key, pContext, qContext);
-
-	if (std::fwrite(decrypted.data().data(), 1, nwrite, dst) != nwrite) {
-	    std::fprintf(stderr, "fwrite error\n");
-	    std::exit(3);
-	}
-    }
-
-    std::fclose(src);
-    std::fclose(dst);
-}
-
-template<std::size_t KeyBits>
-void decrypt_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key)
-{
-    // const std::size_t PlainUnitBytes = (KeyBits - 32) / 8;
-    const std::size_t CipherUnitBytes = KeyBits / 8;
-    const std::size_t PlainUnitBytes = CipherUnitBytes - 1;
-
-    GNKCtx<KeyBits/2> pContext(key.p);
-    GNKCtx<KeyBits/2> qContext(key.q);
-
-    std::size_t dstsz;
-    if (std::fread(&dstsz, sizeof(std::size_t), 1, src) != 1) {
-	std::perror("cannot read the size of the original file");
-	std::exit(3);
-    }
-
-    std::size_t nread;
-    std::size_t nbuf;
-    std::vector<BigUInt<KeyBits>> buffers(threadNum);
-    // ctpl::thread_pool thrdpool(threadNum);
-    for (;;) {
-        nbuf = 0;
-        for (int i = 0; i < buffers.size(); ++i) {
-            buffers[i] = 0;
-            nread = std::fread(buffers[i].data().data(), 1, CipherUnitBytes, src);
-            if (nread < CipherUnitBytes) {
-                if (std::ferror(src)) {
-                    std::perror("fread error");
-                    std::exit(10);
-                } else {
-                    if (nread == 0) {
-                        break;
-                    } else {
-                        fmt::print(stderr, "format error(incomplete file)\n");
-                        std::exit(10);
-                    }
-                }
-            }
-            ++nbuf;
-        }
-
-        if (nbuf == 0)
-            break;
-
-        std::vector<std::future<BigUInt<KeyBits>>> futs(nbuf);
-        for (std::size_t i = 0; i < nbuf; ++i) {
-            futs[i] = std::async([i, &buffers, &key, &pContext, &qContext](){
-                return decryptUsingChineseRemainderTheorem(buffers[i], key, pContext, qContext);
-            });
-            // futs[i] = thrdpool.push([i, &buffers, &key, &pContext, &qContext, &thrdpool](int id){
-            //     return decryptUsingChineseRemainderTheorem(buffers[i], key, pContext, qContext, &thrdpool);
-            // });
-        }
-
-        for (std::size_t i = 0; i < nbuf; ++i) {
-            std::size_t nwrite = dstsz >= PlainUnitBytes ? PlainUnitBytes : dstsz;
-            dstsz -= nwrite;
-            if (std::fwrite(futs[i].get().data().data(), 1, nwrite, dst) != nwrite) {
-                std::perror("fwrite error");
-                std::exit(11);
-            }
-        }
-    }
-
-    std::fclose(src);
-    std::fclose(dst);   
-}
-
-template<std::size_t KeyBits>
-BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
-    BigUInt<KeyBits> const& cipher, PrivateKey<KeyBits> const& key,
-    GNKCtx<KeyBits/2> const& pContext,
-    GNKCtx<KeyBits/2> const& qContext, bool par)
-{
-    // TimerGuard tg("chineseremainder all:");
-    // TimerGuard tg2("chineseremainder pure:", TimerGuard::Delay{});
-    if (par) {
-        BigUInt<KeyBits/2> m1, m2;
-        auto fut1 = std::async([&cipher, &key, &pContext, &m1](){
-            auto cipher1 = modLess(cipher, key.p);          
-            m1 = modularExp_GNK
-                (cipher1, key.d1, key.p, pContext);
-        });
-
-        auto fut2 = std::async([&cipher, &key, &qContext, &m2](){
-            auto cipher2 = modLess(cipher, key.q);
-            m2 = modularExp_GNK
-                (cipher2, key.d2, key.q, qContext);
-        });
-        fut1.wait();
-        fut2.wait();
-        auto m = fullMultiply_comba_simd(fullMultiply_comba_simd(m1, key.q), key.qInv.template resize<KeyBits>())
-            + fullMultiply_comba_simd(fullMultiply_comba_simd(m2, key.p), key.pInv.template resize<KeyBits>());
-        return modLess(m, key.n);
-    } else {
-        auto cipher1 = modLess(cipher, key.p);
-        auto m1 = modularExp_GNK(cipher1, key.d1, key.p, pContext);
-        auto cipher2 = modLess(cipher, key.q);
-        // fmt::print("1s in d1: {0}\n1s in d2: {1}\n", count1(d1), count1(d2));
-        auto m2 = modularExp_GNK(cipher2, key.d2, key.q, qContext);
-        auto m = fullMultiply(fullMultiply(m1, key.q), key.qInv.template resize<KeyBits>())
-            + fullMultiply(fullMultiply(m2, key.p), key.pInv.template resize<KeyBits>());
-        return modLess(m, key.n);
-    }
-}

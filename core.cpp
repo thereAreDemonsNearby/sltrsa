@@ -144,9 +144,11 @@ namespace aes
 namespace detail
 {
 
-void keyExpansion_aes128(__m128i key, const int roundConstant)
+#define keyExpansion_aes128(key, roundConstant) keyExpansion_aes128_impl \
+    (key, _mm_aeskeygenassist_si128(key, roundConstant))
+
+__m128i keyExpansion_aes128_impl(__m128i key, __m128i keyGened)
 {
-    __m128i keyGened = _mm_aeskeygenassist_si128(key, roundConstant);
     keyGened = _mm_shuffle_epi32(keyGened, _MM_SHUFFLE(3, 3, 3, 3));
     key = _mm_xor_si128(key, _mm_slli_si128(key, 4));
     key = _mm_xor_si128(key, _mm_slli_si128(key, 4));
@@ -160,11 +162,21 @@ void loadKey_aes128(uint8_t* key, __m128i* keySchedule)
 {
     keySchedule[0] = _mm_load_si128(reinterpret_cast<__m128i*>(key));
     // gen key for enc
-    int rc = 1;
-    for (std::size_t i = 1; i <= 10; ++i) {
-        keySchedule[i] = keyExpansion_aes128(keySchedule[i-1], rc);
-        rc *= 2;
-    }
+    // int rc = 1;
+    // for (std::size_t i = 1; i <= 10; ++i) {
+    //     keySchedule[i] = keyExpansion_aes128(keySchedule[i-1], rc);
+    //     rc *= 2;
+    // }
+    keySchedule[1] = keyExpansion_aes128(keySchedule[0], 1);
+    keySchedule[2] = keyExpansion_aes128(keySchedule[1], 2);
+    keySchedule[3] = keyExpansion_aes128(keySchedule[2], 4);
+    keySchedule[4] = keyExpansion_aes128(keySchedule[3], 8);
+    keySchedule[5] = keyExpansion_aes128(keySchedule[4], 16);
+    keySchedule[6] = keyExpansion_aes128(keySchedule[5], 32);
+    keySchedule[7] = keyExpansion_aes128(keySchedule[6], 64);
+    keySchedule[8] = keyExpansion_aes128(keySchedule[7], 128);
+    keySchedule[9] = keyExpansion_aes128(keySchedule[8], 0x1b);
+    keySchedule[10] = keyExpansion_aes128(keySchedule[9], 0x36);
 
     // gen key for dec
     for (std::size_t i = 11, j = 9; i < 20; ++i, --j) {
@@ -223,13 +235,31 @@ void encryptFile_aes128(std::FILE* src, std::FILE* dst, uint8_t* key)
         }
         uint8_t encrypted[BlockSize];
         detail::encryptBlock_aes128(block, encrypted, keySchedule);
-        std::fwrite(encrypted, 1, BlockSize, dst);
+        if (std::fwrite(encrypted, 1, BlockSize, dst) != BlockSize) {
+            std::perror("fwrite error");
+            std::exit(2);
+        }
     }
 }
 
 void decryptFile_aes128(std::FILE* src, std::FILE* dst, uint8_t* key)
 {
     
+}
+
+void selfTest()
+{
+    uint8_t plain[]      = {0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34};
+    uint8_t enc_key[]    = {0x2c, 0x7e, 0x15, 0x16, 0x33, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c};
+    uint8_t computed_cipher[16];
+    uint8_t computed_plain[16];
+    int out=0;
+    __m128i key_schedule[20];
+    detail::loadKey_aes128(enc_key,key_schedule);
+    detail::encryptBlock_aes128(plain, computed_cipher, key_schedule);
+    detail::decryptBlock_aes128(computed_cipher, computed_plain, key_schedule);
+    if(memcmp(plain,computed_plain,sizeof(plain)))
+        fmt::print(stderr, "error");
 }
 
 } // namespace aes

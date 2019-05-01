@@ -27,6 +27,7 @@ namespace aes
 // uint8_t key[16] 128/8=16
 void encryptFile_aes128(std::FILE* src, std::FILE* dst, uint8_t* key);
 void decryptFile_aes128(std::FILE* src, std::FILE* dst, uint8_t* key);
+void selfTest();
 }
 
 namespace sha

@@ -30,9 +30,9 @@ static std::size_t fileSize(std::FILE* fp)
 
 
 template<std::size_t KeyBits>
-PublicKey<KeyBits> readPublicKey(std::ifstream& ifs)
+rsa::PublicKey<KeyBits> readPublicKey(std::ifstream& ifs)
 {
-    PublicKey<KeyBits> pk;
+    rsa::PublicKey<KeyBits> pk;
     std::string buf;
     std::getline(ifs, buf);
     std::getline(ifs, buf);
@@ -44,9 +44,9 @@ PublicKey<KeyBits> readPublicKey(std::ifstream& ifs)
 }
 
 template<std::size_t KeyBits>
-PrivateKey<KeyBits> readPrivateKey(std::ifstream& ifs)
+rsa::PrivateKey<KeyBits> readPrivateKey(std::ifstream& ifs)
 {
-    PrivateKey<KeyBits> pk;
+    rsa::PrivateKey<KeyBits> pk;
     std::string buf;
     std::getline(ifs, buf);    std::getline(ifs, buf);
     pk.d = BigUInt<KeyBits>::fromDec(buf);

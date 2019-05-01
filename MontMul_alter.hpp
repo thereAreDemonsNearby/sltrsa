@@ -87,7 +87,7 @@ struct MontMultiplier_cios
     }
 };
 
-std::size_t myPow(std::size_t base, std::size_t p)
+inline std::size_t myPow(std::size_t base, std::size_t p)
 {
     if (p == 0) return 1;
     if (p == 1) return base;

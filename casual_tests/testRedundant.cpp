@@ -29,7 +29,7 @@ void test0()
 
 int main()
 {
-    constexpr std::size_t B = 2048;
+    constexpr std::size_t B = 1024;
     auto modulus = BigUInt<B>::randomGenOdd();    
     ContextOfMontgomery<B> mctx(modulus);
     GNKCtx<B> gkctx(modulus);
@@ -47,7 +47,7 @@ int main()
     }
     {
         TimerGuard tg("cios");
-        modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, modulus, mctx);
+        res1 = modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, modulus, mctx);
     }
     {
         TimerGuard tg("gnk");
@@ -57,17 +57,22 @@ int main()
         TimerGuard tg("gnk mon ladder");
         modularExp_GNK_monLadder(base, exp, modulus, gkctx);
     }
+
+    {
+        TimerGuard tg("gnk w4");
+        res2 = modularExp_GNK_w4(base, exp, modulus, gkctx);
+    }
     
     if (res1 != res2) {
         fmt::print("error\nres1={0}\nres2={1}\n", res1.toHex(), res2.toHex());
     } else {
         fmt::print("equal\n");
     }
-    if (res1 != res3) {
-        fmt::print("error\nres1={0}\nres3={1}\n", res1.toHex(), res3.toHex());
-    } else {
-        fmt::print("equal\n");
-    }
+    // if (res1 != res3) {
+    //     fmt::print("error\nres1={0}\nres3={1}\n", res1.toHex(), res3.toHex());
+    // } else {
+    //     fmt::print("equal\n");
+    // }
 }
 
 // g++ -O2 -std=c++17 -mavx2 -lfmt -o testRedundant testRedundant.cpp ../fullMultiply_alter.cpp 

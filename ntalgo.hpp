@@ -631,10 +631,58 @@ BigUInt<B> modularExp_GNK(BigUInt<B> const& base, BigUInt<B> const& exp,
 }
 
 template<std::size_t B>
+BigUInt<B> modularExp_GNK_w4(BigUInt<B> const& base, BigUInt<B> const& exp,
+                          BigUInt<B> const& modulus, GNKCtx<B> const& ctx)
+{
+    // sliding window of size 4
+    uint32_t radix = GNKCtx<B>::radix;
+    RedundantForm baseRF = toRedundantForm(base, GNKCtx<B>::radix, GNKCtx<B>::mask); // base in redundant form
+    RedundantForm modulusRF = toRedundantForm(modulus, GNKCtx<B>::radix, GNKCtx<B>::mask);
+    RedundantForm rrRF = toRedundantForm(ctx.rr, GNKCtx<B>::radix, GNKCtx<B>::mask); // 2^(2*k*radix) mod m in rf
+    // printRedundantForm(baseRF); printRedundantForm(modulusRF);
+    // printRedundantForm(rrRF); fmt::print("rr:{}\n", ctx.rr.toDec());
+
+    RedundantForm one(baseRF.size);
+    one.first = 1;
+    // RedundantForm resultRFMF = montMul_GNK(one, rrRF, modulusRF, ctx); // montgomery form
+    RedundantForm baseRFMF = montMul_GNK(baseRF, rrRF, modulusRF, ctx); // montgomery form
+
+    std::array<RedundantForm, 16> table;
+    table[0] = montMul_GNK(one, rrRF, modulusRF, ctx);;
+    table[1] = baseRFMF;
+    for (std::size_t i = 1; i < 8; ++i) {
+        table[2*i] = montMul_GNK(table[i], table[i], modulusRF, ctx);
+        table[2*i + 1] = montMul_GNK(table[2*i], baseRFMF, modulusRF, ctx);
+    }
+    std::array<uint8_t, 8 * BigUInt<B>::VLEN> windows;
+    for (int i = BigUInt<B>::VLEN - 1, j = 0; i >= 0; --i, j += 8) {
+        windows[j] = (exp[i] >> 28) & 0xf;
+        windows[j+1] = (exp[i] >> 24) & 0xf;
+        windows[j+2] = (exp[i] >> 20) & 0xf;
+        windows[j+3] = (exp[i] >> 16) & 0xf;
+        windows[j+4] = (exp[i] >> 12) & 0xf;
+        windows[j+5] = (exp[i] >> 8) & 0xf;
+        windows[j+6] = (exp[i] >> 4) & 0xf;
+        windows[j+7] = (exp[i]) & 0xf;
+    }
+    RedundantForm result = table[windows[0]];
+    for (std::size_t i = 1; i < windows.size(); ++i) {
+        result = montMul_GNK(result, result, modulusRF, ctx);
+        result = montMul_GNK(result, result, modulusRF, ctx);
+        result = montMul_GNK(result, result, modulusRF, ctx);
+        result = montMul_GNK(result, result, modulusRF, ctx);
+
+        result = montMul_GNK(result, table[windows[i]], modulusRF, ctx);
+    }
+    // convert from montgomery form to the original form
+    result = montMul_GNK(result, one, modulusRF, ctx);
+    return redundantFormToBase32<B>(result, GNKCtx<B>::radix);
+}
+
+template<std::size_t B>
 BigUInt<B> modularExp_GNK_monLadder(BigUInt<B> const& base, BigUInt<B> const& exp,
                           BigUInt<B> const& modulus, GNKCtx<B> const& ctx)
 {
-    // sliding window of size 8
     uint32_t radix = GNKCtx<B>::radix;
     RedundantForm baseRF = toRedundantForm(base, GNKCtx<B>::radix, GNKCtx<B>::mask); // base in redundant form
     RedundantForm modulusRF = toRedundantForm(modulus, GNKCtx<B>::radix, GNKCtx<B>::mask);

@@ -49,7 +49,7 @@ int main()
     {
         TimerGuard tg("cios");
         res1 = modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, modulus, mctx);
-    }    
+    }
     {
         TimerGuard tg("gnk");
         res2 = modularExp_GNK(base, exp, modulus, gkctx);

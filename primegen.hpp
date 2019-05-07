@@ -17,7 +17,7 @@ template<std::size_t B>
 bool millerRabin_par(BigUInt<B> const& n, int threadNum,
                      bool& likely, std::mutex& mut_likely, std::condition_variable& cv_likely)
 {
-    ContextOfMontgomery<B> context(n);
+    GNKCtx<B> context(n);
     auto a = Random<BigUInt<B>>()(1, n-1);
     if (millerRabin_witness(a, n, context))
 	return true;

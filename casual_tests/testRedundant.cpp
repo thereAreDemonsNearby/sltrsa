@@ -1,6 +1,5 @@
 #include <fmt/format.h>
 #include "../ntalgo.hpp"
-#include "../MontMul_alter.hpp"
 
 void test0()
 {
@@ -37,7 +36,7 @@ int main()
     auto base = BigUInt<B>::randomGen();
     auto exp = BigUInt<B>::randomGen();
     // auto exp = BigUInt<B>{65537};
-    BigUInt<B> res1, res2;
+    BigUInt<B> res1, res2, res3;
     {
         TimerGuard tg("normal");
         modularExp_montgomery(base, exp, modulus, mctx);
@@ -48,15 +47,24 @@ int main()
     }
     {
         TimerGuard tg("cios");
-        res1 = modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, modulus, mctx);
+        modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, modulus, mctx);
     }
     {
         TimerGuard tg("gnk");
-        res2 = modularExp_GNK(base, exp, modulus, gkctx);
+        modularExp_GNK(base, exp, modulus, gkctx);
+    }
+    {
+        TimerGuard tg("gnk mon ladder");
+        modularExp_GNK_monLadder(base, exp, modulus, gkctx);
     }
     
     if (res1 != res2) {
         fmt::print("error\nres1={0}\nres2={1}\n", res1.toHex(), res2.toHex());
+    } else {
+        fmt::print("equal\n");
+    }
+    if (res1 != res3) {
+        fmt::print("error\nres1={0}\nres3={1}\n", res1.toHex(), res3.toHex());
     } else {
         fmt::print("equal\n");
     }

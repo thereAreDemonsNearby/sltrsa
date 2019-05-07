@@ -51,7 +51,7 @@ int main(int argc, char** argv)
         } else {
             fmt::print(stderr, "{} is not a valid key length\n", argv[idx]);
             std::exit(1);
-        }        
+        }
     } else if (idx < argc && std::strcmp(argv[idx], "--help") == 0) {
         fmt::print(stderr, "usage: {} [-l 1024|2048|4096] <key name>\n", argv[0]);
         std::exit(1);

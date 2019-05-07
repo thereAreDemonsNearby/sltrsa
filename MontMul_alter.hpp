@@ -1,4 +1,5 @@
 #include <x86intrin.h>
+#include <boost/align.hpp>
 #include "ntalgo.hpp"
 
 template <std::size_t B, typename MontMulT>
@@ -101,7 +102,6 @@ inline std::size_t myPow(std::size_t base, std::size_t p)
 }
 
 
-
 template<std::size_t B>
 struct GNKCtx
 {
@@ -134,38 +134,65 @@ public:
     // rr = r^2 mod modulus
     BigUInt<B> rr;
 
-    GNKCtx(BigUInt<B> const& modulus);    
+    GNKCtx(BigUInt<B> const& modulus);
 };
 
-inline void printRedundantForm(std::vector<uint64_t> const& rf)
+struct RedundantForm
 {
-    for (auto it = rf.rbegin(); it != rf.rend(); ++it) {
-        fmt::print("{:x}|", *it);
+    uint64_t first;
+    // meet the alignment requirement of AVX2
+    std::vector<uint64_t,
+                boost::alignment::aligned_allocator<uint64_t, 32>> rest;
+    std::size_t size;
+
+    uint64_t& operator[](std::size_t idx) {
+        if (idx == 0) return first;
+        else return rest[idx - 1];
+    }
+
+    uint64_t operator[](std::size_t idx) const {
+        if (idx == 0) return first;
+        else return rest[idx - 1];
+    }
+
+    // constructor
+    RedundantForm(std::size_t sz)
+        : first(0), rest((sz-1+3)/4*4, 0), size(sz)
+    {}
+};
+
+inline void printRedundantForm(RedundantForm const& rf)
+{
+    for (std::size_t idx = rf.size; idx > 0; --idx) {
+        fmt::print("{:x}|", rf[idx - 1]);
     }
     fmt::print("\n");
 }
 
 template<std::size_t B>
-std::vector<uint64_t> toRedundantForm(BigUInt<B> const& orig, uint32_t radix, uint32_t mask);
+RedundantForm toRedundantForm(BigUInt<B> const& orig, uint32_t radix, uint32_t mask);
 
-inline void normalizeRedundantForm(std::vector<uint64_t>& rf, uint32_t radix, uint32_t mask)
+inline void normalizeRedundantForm(RedundantForm& rf, uint32_t radix, uint32_t mask)
 {
     // BigUInt<128> tmp = 0;
     uint64_t tmp = 0;
-    for (std::size_t i = 0; i < rf.size(); ++i) {
-        tmp += rf[i];
-        rf[i] = tmp & mask;
+    tmp += rf.first;
+    rf.first = tmp & mask;
+    tmp >>= radix;
+    for (std::size_t i = 0; i < rf.size - 1; ++i) {
+        tmp += rf.rest[i];
+        rf.rest[i] = tmp & mask;
         tmp >>= radix;
     }
     assert(tmp == 0);
 }
 
 template<std::size_t B>
-BigUInt<B> redundantFormToBase32(std::vector<uint64_t> const& rf, uint32_t radix);
+BigUInt<B> redundantFormToBase32(RedundantForm const& rf, uint32_t radix);
 
 template<std::size_t B>
-std::vector<uint64_t> montMul_GNK(std::vector<uint64_t>& lhs, std::vector<uint64_t>& rhs,
-                                  std::vector<uint64_t>& modulus, GNKCtx<B> const& ctx)
+RedundantForm montMul_GNK(RedundantForm& lhs, RedundantForm& rhs,
+                                  RedundantForm& modulus, GNKCtx<B> const& ctx)
 {
     constexpr std::size_t origLen = (B + GNKCtx<B>::radix - 1) / GNKCtx<B>::radix;
     constexpr std::size_t vecLen = ((origLen-1) + 3) / 4;
@@ -173,46 +200,46 @@ std::vector<uint64_t> montMul_GNK(std::vector<uint64_t>& lhs, std::vector<uint64
     
     std::size_t addLimit = myPow(2, 64 - 2 * GNKCtx<B>::radix);
     std::size_t addCounter = 0;
-    lhs.resize(len, 0);
-    modulus.resize(len, 0);
+    // lhs.resize(len, 0);
+    // modulus.resize(len, 0);
     __m256i lhsVec[vecLen];
     __m256i modVec[vecLen];
     __m256i resVec[vecLen];
-    std::vector<uint64_t> result(len, 0);
-    uint64_t lhs0 = lhs[0];
-    uint64_t mod0 = modulus[0];
+    RedundantForm result(lhs.size);
+    uint64_t lhs0 = lhs.first;
+    uint64_t mod0 = modulus.first;
     uint64_t x0 = ctx.x0 & ctx.mask; // y*r-x*modulus=1
 
     for (std::size_t i = 0; i < vecLen; ++i) {
-        lhsVec[i] = _mm256_loadu_si256(reinterpret_cast<__m256i*>(lhs.data() + 1 + 4 * i));
+        lhsVec[i] = _mm256_load_si256(reinterpret_cast<__m256i*>(lhs.rest.data() + 4 * i));
     }
     for (std::size_t i = 0; i < vecLen; ++i) {
-        modVec[i] = _mm256_loadu_si256(reinterpret_cast<__m256i*>(modulus.data() + 1 + 4 * i));
+        modVec[i] = _mm256_load_si256(reinterpret_cast<__m256i*>(modulus.rest.data() + 4 * i));
     }
     
     for (std::size_t i = 0; i < origLen; ++i) {
-        result[0] += lhs0 * rhs[i];
+        result.first += lhs0 * rhs[i];
         __m256i b = _mm256_set1_epi64x(rhs[i]);
         for (std::size_t j = 0; j < vecLen; ++j) {
-            resVec[j] = _mm256_loadu_si256(reinterpret_cast<__m256i*>(result.data() + 1 + 4*j));
+            resVec[j] = _mm256_load_si256(reinterpret_cast<__m256i*>(result.rest.data() + 4*j));
             resVec[j] = _mm256_add_epi64(resVec[j], _mm256_mul_epu32(b, lhsVec[j]));
         }
 
-        uint64_t m = ((result[0] & GNKCtx<B>::mask) * x0) & GNKCtx<B>::mask;
-        result[0] += m * mod0;
+        uint64_t m = ((result.first & GNKCtx<B>::mask) * x0) & GNKCtx<B>::mask;
+        result.first += m * mod0;
         b = _mm256_set1_epi64x(m);
         for (std::size_t j = 0; j < vecLen; ++j) {
             resVec[j] = _mm256_add_epi64(resVec[j], _mm256_mul_epu32(b, modVec[j]));
-            _mm256_storeu_si256(reinterpret_cast<__m256i*>(result.data() + 1 + 4*j), resVec[j]);
+            _mm256_store_si256(reinterpret_cast<__m256i*>(result.rest.data() + 4*j), resVec[j]);
         }
 
-        result[0] >>= GNKCtx<B>::radix;
-        result[0] += result[1];
+        result.first >>= GNKCtx<B>::radix;
+        result.first += result.rest[0];
         
-        for (std::size_t j = 2; j < len; ++j) {
-            result[j-1] = result[j];
+        for (std::size_t j = 1; j < len-1; ++j) {
+            result.rest[j-1] = result.rest[j];
         }
-        result[len-1] = 0;
+        result.rest[len-2] = 0;
 
         addCounter += 2;
         if (addCounter >= addLimit) {
@@ -222,10 +249,6 @@ std::vector<uint64_t> montMul_GNK(std::vector<uint64_t>& lhs, std::vector<uint64
             addCounter = 0;
         }
     }
-
-    lhs.resize(origLen);
-    modulus.resize(origLen);
-    result.resize(origLen);
     normalizeRedundantForm(result, GNKCtx<B>::radix, GNKCtx<B>::mask);
     return result;
 }
@@ -235,16 +258,16 @@ BigUInt<B> modularExp_GNK(BigUInt<B> const& base, BigUInt<B> const& exp,
                           BigUInt<B> const& modulus, GNKCtx<B> const& ctx)
 {
     uint32_t radix = GNKCtx<B>::radix;
-    std::vector<uint64_t> baseRF = toRedundantForm(base, GNKCtx<B>::radix, GNKCtx<B>::mask); // base in redundant form
-    std::vector<uint64_t> modulusRF = toRedundantForm(modulus, GNKCtx<B>::radix, GNKCtx<B>::mask);
-    std::vector<uint64_t> rrRF = toRedundantForm(ctx.rr, GNKCtx<B>::radix, GNKCtx<B>::mask); // 2^(2*k*radix) mod m in rf
+    RedundantForm baseRF = toRedundantForm(base, GNKCtx<B>::radix, GNKCtx<B>::mask); // base in redundant form
+    RedundantForm modulusRF = toRedundantForm(modulus, GNKCtx<B>::radix, GNKCtx<B>::mask);
+    RedundantForm rrRF = toRedundantForm(ctx.rr, GNKCtx<B>::radix, GNKCtx<B>::mask); // 2^(2*k*radix) mod m in rf
     // printRedundantForm(baseRF); printRedundantForm(modulusRF);
     // printRedundantForm(rrRF); fmt::print("rr:{}\n", ctx.rr.toDec());
 
-    std::vector<uint64_t> one(baseRF.size(), 0);
-    one[0] = 1;
-    std::vector<uint64_t> resultRFMF = montMul_GNK(one, rrRF, modulusRF, ctx); // montgomery form
-    std::vector<uint64_t> baseRFMF = montMul_GNK(baseRF, rrRF, modulusRF, ctx); // montgomery form
+    RedundantForm one(baseRF.size);
+    one.first = 1;
+    RedundantForm resultRFMF = montMul_GNK(one, rrRF, modulusRF, ctx); // montgomery form
+    RedundantForm baseRFMF = montMul_GNK(baseRF, rrRF, modulusRF, ctx); // montgomery form
 
     BitIterator<BigUInt<B>> bIter{exp, BigUInt<B>::BITS - 1};
     auto end = BitIterator<BigUInt<B>>::beforeBegin();
@@ -278,15 +301,14 @@ GNKCtx<B>::GNKCtx(BigUInt<B> const& modulus)
 //  y = signedMod(y, modulus.template resize<B+32>());
     
     x0 = x[0];
-
 //    assert(fullMultiply(y, r) - fullMultiply(x, modulus.template resize<B+32>()) == 1);
 }
 
 template<std::size_t B>
-std::vector<uint64_t> toRedundantForm(BigUInt<B> const& orig, uint32_t radix, uint32_t mask)
+RedundantForm toRedundantForm(BigUInt<B> const& orig, uint32_t radix, uint32_t mask)
 {
-    auto len = (B + radix) / radix;
-    std:: vector<uint64_t> rf(len, 0);
+    auto len = (B + radix - 1) / radix;
+    RedundantForm rf(len);
     std::size_t origIdx = 0;
     std::size_t bitUsed = 0;
     for (std::size_t i = 0; i < len; ++i) {
@@ -308,10 +330,10 @@ std::vector<uint64_t> toRedundantForm(BigUInt<B> const& orig, uint32_t radix, ui
 
 
 template<std::size_t B>
-BigUInt<B> redundantFormToBase32(std::vector<uint64_t> const& rf, uint32_t radix)
+BigUInt<B> redundantFormToBase32(RedundantForm const& rf, uint32_t radix)
 {
     // assume that rf is normalized
-    assert((B+radix)/radix == rf.size());
+    assert((B + radix - 1) / radix == rf.size);
     BigUInt<B> ret;
     std::size_t rfIdx = 0;
     std::size_t bitUsed = 0;
@@ -321,13 +343,13 @@ BigUInt<B> redundantFormToBase32(std::vector<uint64_t> const& rf, uint32_t radix
         auto bitLeft = radix - bitUsed;
         ret[i] = (rf[rfIdx] >> bitUsed) & m;        
         ++rfIdx;
-        if (rfIdx >= rf.size()) break;
+        if (rfIdx >= rf.size) break;
         need -= bitLeft;
         if (need >= radix) {
             ret[i] |= (rf[rfIdx] << (32 - need)) & m;
             need -= radix;
             ++rfIdx;
-            if (rfIdx >= rf.size()) break;
+            if (rfIdx >= rf.size) break;
             if (need > 0) {
                 ret[i] |= (rf[rfIdx] << (32 - need)) & m;
                 bitUsed = need;

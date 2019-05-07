@@ -6,11 +6,9 @@ void test0()
 {
     BigUInt<256> a = BigUInt<256>::fromHex("fa5401a8593c981bfd42a2802a750928e930850d63bc2c5fda8d4ca9655091ad");
     fmt::print("a is \n{}\n", a.toHex());
-    std::vector<uint64_t> rf = toRedundantForm(a, 29, 0x1fffffff);
+    RedundantForm rf = toRedundantForm(a, 29, 0x1fffffff);
     fmt::print("redundant form is \n");
-    for (auto it = rf.rbegin(); it != rf.rend(); ++it) {
-        fmt::print("{:x}|", *it);
-    }
+    printRedundantForm(rf);
     fmt::print("\n");
 
     BigUInt<256> b = redundantFormToBase32<256>(rf, 29);
@@ -32,12 +30,13 @@ void test0()
 
 int main()
 {
-    constexpr std::size_t B = 1024;
+    constexpr std::size_t B = 2048;
     auto modulus = BigUInt<B>::randomGenOdd();    
     ContextOfMontgomery<B> mctx(modulus);
     GNKCtx<B> gkctx(modulus);
     auto base = BigUInt<B>::randomGen();
     auto exp = BigUInt<B>::randomGen();
+    // auto exp = BigUInt<B>{65537};
     BigUInt<B> res1, res2;
     {
         TimerGuard tg("normal");
@@ -50,12 +49,12 @@ int main()
     {
         TimerGuard tg("cios");
         res1 = modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, modulus, mctx);
-    }
-    
+    }    
     {
         TimerGuard tg("gnk");
         res2 = modularExp_GNK(base, exp, modulus, gkctx);
     }
+    
     if (res1 != res2) {
         fmt::print("error\nres1={0}\nres2={1}\n", res1.toHex(), res2.toHex());
     } else {
@@ -63,4 +62,4 @@ int main()
     }
 }
 
-// g++ -g -std=c++17 -mavx2 -lfmt -o testRedundant testRedundant.cpp ../fullMultiply_alter.cpp 
+// g++ -O2 -std=c++17 -mavx2 -lfmt -o testRedundant testRedundant.cpp ../fullMultiply_alter.cpp 

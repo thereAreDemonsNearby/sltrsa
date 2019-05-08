@@ -811,7 +811,7 @@ bool millerRabin_witness(const BigUInt<B>& a, const BigUInt<B>& n,
 	++iter;
     }
     BigUInt<B> u = m >> t;
-    BigUInt<2*B> x0 = modularExp_GNK(a, u, n, context).extend();
+    BigUInt<2*B> x0 = modularExp_GNK_w4(a, u, n, context).extend();
     BigUInt<2*B> exN = n.extend();
     BigUInt<2*B> one{ 1 };
     BigUInt<2*B> exM = m.extend();
@@ -850,9 +850,9 @@ BigUInt<B> signedMod(BigUInt<B> a, BigUInt<B> const& n)
 	do {
 	    a += n;
 	} while (a.negative());
-    } else {
-	a %= n;
     }
+    
+    a %= n;
     return a;
 }
 

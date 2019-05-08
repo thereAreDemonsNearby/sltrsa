@@ -1,6 +1,24 @@
 #include "core.hpp"
 #include <x86intrin.h>
 
+namespace util
+{
+uint32_t bytesToU32BigEndian(uint8_t* begin)
+{
+    return (uint32_t(begin[0]) << 24) | (uint32_t(begin[1]) << 16)
+        | (uint32_t(begin[2]) << 8) | (uint32_t(begin[3]));
+}
+
+void u32ToBytesBigEndian(uint32_t u32, uint8_t* begin)
+{
+    begin[0] = (u32 >> 24) & 0xff;
+    begin[1] = (u32 >> 16) & 0xff;
+    begin[2] = (u32 >> 8) & 0xff;
+    begin[3] = u32 & 0xff;
+}
+
+}
+
 namespace sha
 {
 namespace detail
@@ -58,7 +76,7 @@ void processChunk_sha256(uint8_t chunk[], uint32_t hash[], uint32_t k[])
 }
 } // end namespace sha::detail
 
-std::vector<uint8_t> fileDigest_sha256(std::FILE* src)
+std::vector<uint8_t> fileDigest_sha256(std::istream& src)
 {
     uint32_t h[8] = {
         0x6a09e667,
@@ -90,8 +108,8 @@ std::vector<uint8_t> fileDigest_sha256(std::FILE* src)
         // init chunk
         for (std::size_t i = 0; i < ChunkSize; ++i)
             chunk[i] = 0;
-        
-        nread = std::fread(chunk, 1, ChunkSize, src);
+
+        nread = src.read((char*)chunk, ChunkSize).gcount();
         totalSize += nread;
         if (nread < ChunkSize) {
             // last chunk
@@ -209,42 +227,115 @@ void decryptBlock_aes128(uint8_t* cipher, uint8_t* plain, __m128i* keySchedule)
 
 }
 
-void encryptFile_aes128(std::FILE* src, std::FILE* dst, uint8_t* key)
+void encryptFile_aes128_CBC(std::istream& src, std::ostream& dst, uint8_t* key)
 {
     __m128i keySchedule[20];
     detail::loadKey_aes128(key, keySchedule);
     
     constexpr std::size_t BlockSize = 128/8; // 16
     std::size_t nread = 0;
-    uint8_t block[BlockSize];
+    std::array<uint8_t, BlockSize> prev;
+    std::array<uint8_t, BlockSize> curr = {0};
+    // generate initialization vector
+    util::randomGenBytes(prev.begin(), prev.end());
+    // write iv
+    if (dst.write((char*)&prev[0], BlockSize); !dst) {
+        std::perror("ostream::write error");
+        std::exit(4);
+    }
     bool quit = false;
     while (!quit) {
-        std::fill(block, block+BlockSize, 0);
-        nread = std::fread(block, 1, BlockSize, src);
+        std::fill(curr.begin(), curr.end(), 0);
+        nread = src.read((char*)&curr[0], BlockSize).gcount();
         if (nread < BlockSize) {
-            if (std::ferror(src)) {
-                std::perror("fread error");
-                std::exit(1);
-            } else {
+            if (src.eof()) {
                 // do padding
                 uint8_t pad = BlockSize - nread;
                 for (std::size_t i = nread; i < BlockSize; ++i)
-                    block[i] = pad;
+                    curr[i] = pad;
                 quit = true;
+            } else {
+                std::perror("istream::read error");
+                std::exit(3);
             }
         }
-        uint8_t encrypted[BlockSize];
-        detail::encryptBlock_aes128(block, encrypted, keySchedule);
-        if (std::fwrite(encrypted, 1, BlockSize, dst) != BlockSize) {
-            std::perror("fwrite error");
-            std::exit(2);
-        }
+        
+        // do CBC xor
+        std::transform(curr.begin(), curr.end(), prev.begin(), curr.begin(),
+                       [](uint8_t a, uint8_t b) { return a ^ b; });
+
+        // encrypt
+        detail::encryptBlock_aes128(&curr[0], &prev[0], keySchedule);
+        dst.write((char*)&prev[0], BlockSize);
+        // if (!dst.good()) {
+        //     std::perror("ostream::write error");
+        //     std::exit(4);
+        // }
     }
 }
 
-void decryptFile_aes128(std::FILE* src, std::FILE* dst, uint8_t* key)
+
+void decryptFile_aes128_CBC(std::istream& src, std::ostream& dst, uint8_t* key)
 {
-    
+    __m128i keySchedule[20];
+    detail::loadKey_aes128(key, keySchedule);
+    constexpr std::size_t BlockSize = 128/8; // 16
+
+    std::array<uint8_t, BlockSize> iv;
+    std::array<uint8_t, BlockSize> cipher;
+    // read iv
+    if (src.read((char*)&iv[0], BlockSize).gcount() != BlockSize) {
+        fmt::print(stderr, "invalid aes file format (no iv)\n");
+        std::exit(5);
+    }
+
+    while (1) {
+        if (std::size_t nread = src.read((char*)&cipher[0], BlockSize).gcount();
+            nread != BlockSize) {
+            if (src.eof()) {
+                fmt::print(stderr, "invalid aes file format\n");
+                std::exit(7);
+            } else {
+                std::perror("istream::read error");
+                std::exit(6);
+            }
+        }
+
+        bool isLast = util::noMoreData(src);
+
+        std::array<uint8_t, BlockSize> plain;
+        detail::decryptBlock_aes128(&cipher[0], &plain[0], keySchedule);
+
+        // do aes xor
+        std::transform(plain.begin(), plain.end(), iv.begin(), plain.begin(),
+                       [](uint8_t a, uint8_t b) { return a ^ b; });
+        iv = cipher;
+        if (isLast) {
+            uint8_t pad = plain[BlockSize - 1];
+            std::size_t nvalid = BlockSize - pad;
+            if (nvalid > 0) {                
+                for (std::size_t i = nvalid; i < BlockSize; ++i) {
+                    if (plain[i] != pad) {
+                        fmt::print(stderr, "invalid aes pad format\n");
+                        std::exit(8);
+                    }
+                    plain[i] = 0;
+                }
+                dst.write((char*)&plain[0], nvalid); 
+                // if (!dst.good()) {
+                //     std::perror("ostream::write error");
+                //     std::exit(7);
+                // }
+            } // else it's a empty block
+            break;
+        } else {
+            dst.write((char*)&plain[0], BlockSize); 
+            // if (!dst.good()) {
+            //     std::perror("ostream::write error");
+            //     std::exit(7);
+            // }
+        }
+    }
 }
 
 void selfTest()

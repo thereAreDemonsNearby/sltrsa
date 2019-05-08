@@ -7,10 +7,14 @@
 #include <future>
 #include <string>
 #include <vector>
+#include <random>
+#include <boost/iostreams/device/array.hpp>
+#include <boost/iostreams/stream.hpp>
 #include "ntalgo.hpp"
 #include "TimerGuard.h"
-#include "MontMul_alter.hpp"
 
+namespace util
+{
 inline bool noMoreData(std::FILE* fp)
 {
     int ch = std::getc(fp);
@@ -22,17 +26,44 @@ inline bool noMoreData(std::FILE* fp)
     }
 }
 
+inline bool noMoreData(std::istream& is)
+{
+    if (is.peek() == std::istream::traits_type::eof())
+        return true;
+    else
+        return false;
+}
+
+using MemStream = boost::iostreams::stream<
+    boost::iostreams::basic_array_source<uint8_t>
+    >;
+
+uint32_t bytesToU32BigEndian(uint8_t* begin);
+void u32ToBytesBigEndian(uint32_t u32, uint8_t* begin);
+
+template <typename ByteIter>
+void randomGenBytes(ByteIter begin, ByteIter end)
+{
+    std::random_device rd;
+    std::mt19937 engine(rd());
+    std::uniform_int_distribution<uint8_t> dist;
+    for (; begin != end; ++begin) {
+        *begin = dist(engine);
+    }
+}
+
+}
+
 namespace aes
 {
 // uint8_t key[16] 128/8=16
-void encryptFile_aes128(std::FILE* src, std::FILE* dst, uint8_t* key);
-void decryptFile_aes128(std::FILE* src, std::FILE* dst, uint8_t* key);
-void selfTest();
+void encryptFile_aes128_CBC(std::istream& src, std::ostream& dst, uint8_t* key);
+void decryptFile_aes128_CBC(std::istream& src, std::ostream& dst, uint8_t* key);
 }
 
 namespace sha
 {
-std::vector<uint8_t> fileDigest_sha256(std::FILE* src);
+std::vector<uint8_t> fileDigest_sha256(std::istream& src);
 }
 
 namespace rsa
@@ -224,7 +255,7 @@ void decryptFile_serial(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> cons
     BigUInt<CipherBlockBytes * 8> cipherBuff;
 //  TimerGuard tg("pure time:", TimerGuard::Delay{}, std::cerr);
     bool quit = false;
-    if (noMoreData(src)) {
+    if (util::noMoreData(src)) {
         std::fputs("no available data in input file", stderr);
     }
     while (!quit) {
@@ -244,7 +275,7 @@ void decryptFile_serial(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> cons
 	std::size_t nwrite = PlainBlockBytes;
 	BigUInt<CipherBlockBytes * 8> decrypted
 	    = decryptUsingChineseRemainderTheorem(cipherBuff, key, pContext, qContext);
-        if (noMoreData(src)) {
+        if (util::noMoreData(src)) {
             // last block
             quit = true;
             uint8_t* p = reinterpret_cast<uint8_t*>(decrypted.data().data());
@@ -280,7 +311,7 @@ void decryptFile_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& 
     std::size_t nbuf;
     std::vector<BigUInt<KeyBits>> buffers(threadNum);
     // ctpl::thread_pool thrdpool(threadNum);
-    if (noMoreData(src)) {
+    if (util::noMoreData(src)) {
         std::fputs("no available data in input file", stderr);
     }
     bool quit = false;
@@ -318,7 +349,7 @@ void decryptFile_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& 
             // });
         }
 
-        if (noMoreData(src)) {            
+        if (util::noMoreData(src)) {            
             quit = true;
             for (std::size_t i = 0; i < nbuf - 1; ++i) {
                 std::size_t nwrite = PlainBlockBytes;
@@ -378,18 +409,28 @@ BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
         });
         fut1.wait();
         fut2.wait();
-        auto m = fullMultiply_comba_simd(fullMultiply_comba_simd(m1, key.q), key.qInv.template resize<KeyBits>())
-            + fullMultiply_comba_simd(fullMultiply_comba_simd(m2, key.p), key.pInv.template resize<KeyBits>());
-        return modLess(m, key.n);
+        auto h = modLess(fullMultiply(key.qInv,
+                                      signedMod(std::move(m1).template resizeMove<KeyBits/2+32>() - m2.template resize<KeyBits/2+32>(), key.p.template resize<KeyBits/2+32>()).template resizeMove<KeyBits/2>()), key.p);
+        auto m = m2.template resize<KeyBits>() + fullMultiply(h, key.q);
+        return m;
     } else {
+        // auto cipher1 = modLess(cipher, key.p);
+        // auto m1 = modularExp_GNK(cipher1, key.d1, key.p, pContext);
+        // auto cipher2 = modLess(cipher, key.q);
+        // // fmt::print("1s in d1: {0}\n1s in d2: {1}\n", count1(d1), count1(d2));
+        // auto m2 = modularExp_GNK(cipher2, key.d2, key.q, qContext);
+        // auto m = fullMultiply(fullMultiply(m1, key.q), key.qInv.template resize<KeyBits>())
+        //     + fullMultiply(fullMultiply(m2, key.p), key.pInv.template resize<KeyBits>());
+        // return modLess(m, key.n);
+        
         auto cipher1 = modLess(cipher, key.p);
         auto m1 = modularExp_GNK(cipher1, key.d1, key.p, pContext);
         auto cipher2 = modLess(cipher, key.q);
-        // fmt::print("1s in d1: {0}\n1s in d2: {1}\n", count1(d1), count1(d2));
         auto m2 = modularExp_GNK(cipher2, key.d2, key.q, qContext);
-        auto m = fullMultiply(fullMultiply(m1, key.q), key.qInv.template resize<KeyBits>())
-            + fullMultiply(fullMultiply(m2, key.p), key.pInv.template resize<KeyBits>());
-        return modLess(m, key.n);
+        auto h = modLess(fullMultiply(key.qInv,
+                                      signedMod(std::move(m1).template resizeMove<KeyBits/2+32>() - m2.template resize<KeyBits/2+32>(), key.p.template resize<KeyBits/2+32>()).template resizeMove<KeyBits/2>()), key.p);
+        auto m = m2.template resize<KeyBits>() + fullMultiply(h, key.q);
+        return m;
     }
 }
 

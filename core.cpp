@@ -1,23 +1,6 @@
 #include "core.hpp"
 #include <x86intrin.h>
 
-namespace util
-{
-uint32_t bytesToU32BigEndian(uint8_t* begin)
-{
-    return (uint32_t(begin[0]) << 24) | (uint32_t(begin[1]) << 16)
-        | (uint32_t(begin[2]) << 8) | (uint32_t(begin[3]));
-}
-
-void u32ToBytesBigEndian(uint32_t u32, uint8_t* begin)
-{
-    begin[0] = (u32 >> 24) & 0xff;
-    begin[1] = (u32 >> 16) & 0xff;
-    begin[2] = (u32 >> 8) & 0xff;
-    begin[3] = u32 & 0xff;
-}
-
-}
 
 namespace sha
 {
@@ -75,84 +58,6 @@ void processChunk_sha256(uint8_t chunk[], uint32_t hash[], uint32_t k[])
     hash[7] += h;
 }
 } // end namespace sha::detail
-
-std::vector<uint8_t> fileDigest_sha256(std::istream& src)
-{
-    uint32_t h[8] = {
-        0x6a09e667,
-        0xbb67ae85,
-        0x3c6ef372,
-        0xa54ff53a,
-        0x510e527f,
-        0x9b05688c,
-        0x1f83d9ab,
-        0x5be0cd19,
-    };
-    uint32_t k[64] = {
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-    };
-
-    // 512 bit chunk
-    constexpr std::size_t ChunkSize = 512/8;
-    uint8_t chunk[ChunkSize];
-    uint64_t totalSize = 0;
-    while (true) {
-        std::size_t nread = 0;
-        // init chunk
-        for (std::size_t i = 0; i < ChunkSize; ++i)
-            chunk[i] = 0;
-
-        nread = src.read((char*)chunk, ChunkSize).gcount();
-        totalSize += nread;
-        if (nread < ChunkSize) {
-            // last chunk
-            chunk[nread] = 0x80;
-            totalSize *= 8; // count in bits
-            if (ChunkSize - nread > 8) {
-                // enough space for padding
-                // big endian
-                for (std::size_t i = 1; i <= 8; ++i) {
-                    chunk[ChunkSize - i] = uint8_t(totalSize);
-                    totalSize >>= 8;
-                }
-                // for (std::size_t i = 0; i < ChunkSize; ++i)
-                //     fmt::print("{0:02x}", chunk[i]);
-                // fmt::print("\n");
-                detail::processChunk_sha256(chunk, h, k);
-            } else {
-                // not enough space for padding. one more chunk.
-                detail::processChunk_sha256(chunk, h, k);
-                uint8_t extraChunk[ChunkSize] = {0};
-                for (std::size_t i = 1; i <= 8; ++i) {
-                    chunk[ChunkSize - i] = uint8_t(totalSize);
-                    totalSize >>= 8;
-                }
-                detail::processChunk_sha256(extraChunk, h, k);
-            }
-            break;
-        } else {
-            // whole chunk
-            detail::processChunk_sha256(chunk, h, k);
-        }
-    }
-
-    std::vector<uint8_t> digest(32, 0);
-    for (std::size_t i = 0; i < 8; ++i) {
-        // big endian
-        digest[4*i] = uint8_t(h[i] >> 24);
-        digest[4*i+1] = uint8_t(h[i] >> 16);
-        digest[4*i+2] = uint8_t(h[i] >> 8);
-        digest[4*i+3] = uint8_t(h[i]);
-    }
-    return digest;
-}
 
 } // namespace sha
 

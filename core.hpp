@@ -38,8 +38,21 @@ using MemStream = boost::iostreams::stream<
     boost::iostreams::basic_array_source<uint8_t>
     >;
 
-uint32_t bytesToU32BigEndian(uint8_t* begin);
-void u32ToBytesBigEndian(uint32_t u32, uint8_t* begin);
+template <typename U8Iter>
+uint32_t bytesToU32BigEndian(U8Iter begin)
+{
+    return (uint32_t(begin[0]) << 24) | (uint32_t(begin[1]) << 16)
+        | (uint32_t(begin[2]) << 8) | (uint32_t(begin[3]));
+}
+
+template <typename U8Iter>
+void u32ToBytesBigEndian(uint32_t u32, U8Iter begin)
+{
+    begin[0] = (u32 >> 24) & 0xff;
+    begin[1] = (u32 >> 16) & 0xff;
+    begin[2] = (u32 >> 8) & 0xff;
+    begin[3] = u32 & 0xff;
+}
 
 template <typename ByteIter>
 void randomGenBytes(ByteIter begin, ByteIter end)
@@ -52,7 +65,7 @@ void randomGenBytes(ByteIter begin, ByteIter end)
     }
 }
 
-}
+} // end namespace util
 
 namespace aes
 {
@@ -63,17 +76,359 @@ void decryptFile_aes128_CBC(std::istream& src, std::ostream& dst, uint8_t* key);
 
 namespace sha
 {
-std::vector<uint8_t> fileDigest_sha256(std::istream& src);
+namespace detail
+{
+uint32_t rightRotate(uint32_t v, std::size_t s);
+// byte chunk[64], uint32_t hash[8], uint32_t k[64]
+void processChunk_sha256(uint8_t chunk[], uint32_t hash[], uint32_t k[]);
+} // end namespace sha::detail
+
+template <typename InputIterator, typename OutputIterator>
+OutputIterator fileDigest_sha256(InputIterator begin, InputIterator end,
+                       OutputIterator out)
+{
+    static_assert(sizeof *begin == 1, "must be byte iterator");
+    uint32_t h[8] = {
+        0x6a09e667,
+        0xbb67ae85,
+        0x3c6ef372,
+        0xa54ff53a,
+        0x510e527f,
+        0x9b05688c,
+        0x1f83d9ab,
+        0x5be0cd19,
+    };
+    uint32_t k[64] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    };
+
+    // 512 bit chunk
+    constexpr std::size_t ChunkSize = 512/8; // 64 bytes
+    uint8_t chunk[ChunkSize];
+    uint64_t totalSize = 0;
+    while (true) {
+        // init chunk to 0's
+        for (std::size_t i = 0; i < ChunkSize; ++i)
+            chunk[i] = 0;
+
+        // read one chunk
+        std::size_t nread = 0;
+        for (; begin != end && nread != ChunkSize; ++begin, ++nread) {
+            chunk[nread] = *begin;
+        }
+        
+        totalSize += nread;
+        if (nread < ChunkSize) {
+            // begin == end, last chunk 
+            chunk[nread] = 0x80;
+            totalSize *= 8; // count in bits
+            if (ChunkSize - nread > 8) {
+                // enough space for padding
+                // big endian
+                for (std::size_t i = 1; i <= 8; ++i) {
+                    chunk[ChunkSize - i] = (uint8_t)totalSize;
+                    totalSize >>= 8;
+                }
+                // for (std::size_t i = 0; i < ChunkSize; ++i)
+                //     fmt::print("{0:02x}", chunk[i]);
+                // fmt::print("\n");
+                detail::processChunk_sha256(chunk, h, k);
+            } else {
+                // not enough space for padding. one more chunk.
+                detail::processChunk_sha256(chunk, h, k);
+                uint8_t extraChunk[ChunkSize] = {0};
+                for (std::size_t i = 1; i <= 8; ++i) {
+                    chunk[ChunkSize - i] = uint8_t(totalSize);
+                    totalSize >>= 8;
+                }
+                detail::processChunk_sha256(extraChunk, h, k);
+            }
+            break; // time to quit loop
+        } else {
+            // whole chunk
+            detail::processChunk_sha256(chunk, h, k);
+        }
+    }
+
+    std::vector<uint8_t> digest(32, 0);
+    for (std::size_t i = 0; i < 8; ++i) {
+        // big endian
+        *out++ = uint8_t(h[i] >> 24);
+        *out++ = uint8_t(h[i] >> 16);
+        *out++ = uint8_t(h[i] >> 8);
+        *out++ = uint8_t(h[i]);
+    }
+    return out;
 }
+
+}
+
+namespace util
+{
+template <typename InIter, typename OutIter>
+void mgf1(InIter seedBegin, InIter seedEnd, OutIter maskBegin, OutIter maskEnd)
+{
+    // use sha256 as the optional hash function
+    // sha256 generates 256bit(32byte) output
+    std::size_t len = maskEnd - maskBegin;
+    constexpr std::size_t hashLen = 32;
+    std::vector<uint8_t> mask; // the result mask
+    uint8_t hash[hashLen];
+    std::size_t limit = (len + hashLen-1) / hashLen; // ceil(len/hashLen)
+    std::vector<uint8_t> toBeHashed(seedEnd-seedBegin+4);
+    std::copy(seedBegin, seedEnd, toBeHashed.begin());
+
+    uint32_t counter;
+    for (counter = 0; counter < limit - 1; ++counter) {
+        // seed || counter
+        u32ToBytesBigEndian(counter, toBeHashed.end() - 4);        
+        sha::fileDigest_sha256(toBeHashed.begin(), toBeHashed.end(),
+                               std::begin(hash));
+        std::copy(std::begin(hash), std::end(hash), maskBegin);
+        maskBegin += hashLen;
+    }
+    // treat the last loop separately
+    u32ToBytesBigEndian(counter, toBeHashed.end() - 4);  
+    sha::fileDigest_sha256(toBeHashed.begin(), toBeHashed.end(),
+                           std::begin(hash));
+    std::size_t restSz = maskEnd - maskBegin;
+    std::copy(std::begin(hash), std::begin(hash) + restSz,
+              maskBegin);
+    maskBegin += restSz;
+    assert(maskBegin == maskEnd);   
+}
+
+// [begin, end) : original message
+// [out, out+len) : the encoded message
+template<typename InIter, typename OutIter>
+void OAEPEncode(InIter begin, InIter end,
+                OutIter out, std::size_t len)
+{
+    // use empty label
+    // use sha256 as the optional hash function
+    uint8_t emptyHash[] = {
+        0xe3,0xb0,0xc4,0x42,0x98,0xfc,0x1c,0x14,
+        0x9a,0xfb,0xf4,0xc8,0x99,0x6f,0xb9,0x24,
+        0x27,0xae,0x41,0xe4,0x64,0x9b,0x93,0x4c,
+        0xa4,0x95,0x99,0x1b,0x78,0x52,0xb8,0x55
+    };
+    std::size_t hashLen = 32;
+    std::size_t msgLen = end - begin;
+    if (msgLen > len - 2 * hashLen - 2) {
+        assert(false && "message too long");
+    }
+    // format:
+    // [out, out+1) : 0x00
+    // [out+1, out+1+hLen) : masked seed
+    // [out+1+hLen, out+len) : masked db
+
+    // inside db:
+    // [out+1+hLen, out+1+2*hLen) : label hash
+    // between hash and 0x01 : 0's
+    // [out+len-mLen-1, out+len-mLen) : 0x01
+    // [out+len-mLen, out+len) : message
+    
+    out[0] = 0x00;
+    randomGenBytes(out+1, out+1+hashLen); // seed
+    std::copy(std::begin(emptyHash), std::end(emptyHash),
+              out+1+hashLen); // labelHash;
+    out[len-msgLen-1] = 0x1;
+    std::copy(begin, end, out+len-msgLen); // message
+    std::fill(out+1+2*hashLen, out+len-msgLen-1, 0); // 0's
+
+    // db to masked db
+    std::vector<uint8_t> dbMask(len-hashLen-1);
+    mgf1(out+1, out+1+hashLen, dbMask.begin(), dbMask.end());
+    std::transform(dbMask.begin(), dbMask.end(),
+                   out+1+hashLen, out+1+hashLen,
+                   [](uint8_t a, uint8_t b){ return a ^ b; });
+
+    // seed to masked seed
+    std::vector<uint8_t> seedMask(hashLen);
+    mgf1(out+1+hashLen, out+len, seedMask.begin(), seedMask.end());
+    std::transform(seedMask.begin(), seedMask.end(),
+                   out+1, out+1,
+                   [](uint8_t a, uint8_t b){ return a ^ b; });
+    // done   
+}
+
+
+// return value: pair(OutIter, bool)
+// stands for (end iterator for output, valid format?)
+// [begin, end): encoded message
+// [out, ...): the original message
+template<typename InIter, typename OutIter>
+std::pair<bool, OutIter> OAEPDecode(InIter begin, InIter end,
+                                    OutIter out)
+{
+    uint8_t emptyHash[] = {
+        0xe3,0xb0,0xc4,0x42,0x98,0xfc,0x1c,0x14,
+        0x9a,0xfb,0xf4,0xc8,0x99,0x6f,0xb9,0x24,
+        0x27,0xae,0x41,0xe4,0x64,0x9b,0x93,0x4c,
+        0xa4,0x95,0x99,0x1b,0x78,0x52,0xb8,0x55
+    };
+    std::size_t hashLen = 32;
+    std::size_t len = end - begin;
+
+    // format:
+    // [begin, begin+1) : 0x00
+    // [begin+1, begin+1+hLen) : masked seed
+    // [begin+1+hLen, begin+len) : masked db
+    if (len < 2 * hashLen + 2) {
+        return {false, out};
+    }
+    if (begin[0] != 0x00) {
+        return {false, out};
+    }
+
+    // masked seed to seed:
+    std::vector<uint8_t> seedMask(hashLen);
+    mgf1(begin+1+hashLen, end, seedMask.begin(), seedMask.end());
+    std::transform(seedMask.begin(), seedMask.end(),
+                   begin+1, begin+1,
+                   [](uint8_t a, uint8_t b){ return a ^ b; });
+    // masked db to db:
+    std::vector<uint8_t> dbMask(len-hashLen-1);
+    mgf1(begin+1, begin+1+hashLen, dbMask.begin(), dbMask.end());
+    std::transform(dbMask.begin(), dbMask.end(),
+                   begin+1+hashLen, begin+1+hashLen,
+                   [](uint8_t a, uint8_t b){ return a ^ b; });
+    if (!std::equal(std::begin(emptyHash), std::end(emptyHash),
+                   begin+1+hashLen, begin+1+2*hashLen)) {
+        // label hash is wrong
+        return {false, out};
+    }
+    
+    auto it = begin+1+2*hashLen;
+    for (;it != end && *it == 0x0; ++it) {
+        ;
+    }
+
+    if (it == end || *it != 0x1) {
+        return {false, out};
+    }
+    ++it; // skip 0x1
+
+    // copy message to out
+    out = std::copy(it, end, out);
+    return {true, out};
+}
+
+// input: hash of the original message
+//        [hashBegin, hashEnd)
+// output: pss encoded hash
+//         [out, out+len)
+template<typename InIter, typename OutIter>
+void PSSEncode(InIter hashBegin, InIter hashEnd,
+               OutIter out, std::size_t len,
+               std::size_t saltLen)
+{
+    // choose sha256 as the optional hash function
+    constexpr std::size_t hashLen = 32;
+    if (len < 2 + saltLen + hashLen) {
+        assert(false && "hash or salt too long");
+    }
+
+    // format:
+    // [out, out+len-hashLen-1): masked db
+    // [out+len-hashLen-1, out+len-1): H'
+    // the last byte: 0xbc
+
+    std::vector<uint8_t> toBeHashed(7+ hashLen + saltLen, 0);
+    std::copy(hashBegin, hashEnd, toBeHashed.begin() + 7);
+    // gen salt
+    util::randomGenBytes(toBeHashed.begin() + 7 + hashLen,
+                         toBeHashed.end());
+
+    // fill db
+    std::size_t padSz = len - hashLen - 1 - 1 - saltLen;
+    auto it = out;
+    it = std::fill(it, it+padSz, 0);
+    *it++ = 0x1;
+    it = std::copy(toBeHashed.begin()+7+hashLen, toBeHashed.end(), it);
+
+    // the second hash
+    it = sha::fileDigest_sha256(toBeHashed.begin(), toBeHashed.end(), it);
+
+    // db -> masked db
+    std::vector<uint8_t> dbMask(len - hashLen - 1);
+    mgf1(it - hashLen, it, dbMask.begin(), dbMask.end());
+    std::transform(dbMask.begin(), dbMask.end(), out, out,
+                   [](uint8_t a, uint8_t b){ return a^b; });
+
+    *it++ = 0xbc;
+}
+
+enum class PSSDecodeResult
+{
+    FormatError, HashValueError, Ok
+};
+// input: hash of the original message
+// input: the PSS decoded hash digest
+// verify.
+template<typename HashIter, typename PSSIter>
+PSSDecodeResult PSSDecode(HashIter hashBegin, HashIter hashEnd,
+                          PSSIter pssBegin, PSSIter pssEnd)
+{
+    const std::size_t hashLen = 32; // sha256
+    std::size_t len = pssEnd - pssBegin;
+    if (pssBegin[len-1] != 0xbc) {
+        return PSSDecodeResult::FormatError;
+    }
+
+    std::vector<uint8_t> dbMask(len - 1 - hashLen);
+    mgf1(pssBegin + len - hashLen - 1, pssBegin + len - 1,
+         dbMask.begin(), dbMask.end());
+    // recover db
+    std::transform(dbMask.begin(), dbMask.end(),
+                   pssBegin, pssBegin,
+                   [](uint8_t a, uint8_t b){ return a^b; });
+    std::size_t saltLen;
+    auto it = pssBegin;
+    for (; it != pssBegin+len-hashLen-1 && *it == 0x0; ++it) {
+        ;
+    }
+    if (it == pssBegin + len - hashLen - 1 || *it != 0x1) {
+        return PSSDecodeResult::FormatError;
+    }
+    ++it;
+    auto saltBegin = it;
+    auto saltEnd = pssBegin + len - hashLen - 1;
+    saltLen = saltEnd - saltBegin;
+
+    std::vector<uint8_t> toBeHashed(7+hashLen+saltLen, 0);
+    auto it2 = std::copy(hashBegin, hashEnd, toBeHashed.begin()+7);
+    std::copy(saltBegin, saltEnd, it2);
+    std::vector<uint8_t> hash(hashLen);
+    sha::fileDigest_sha256(toBeHashed.begin(), toBeHashed.end(), hash.begin());
+
+    if (!std::equal(pssBegin+len-hashLen-1, pssBegin+len-1, hash.begin())) {
+        return PSSDecodeResult::HashValueError;
+    }
+
+    return Ok;
+}
+
+
+} // end namespace util
 
 namespace rsa
 {
 
+
+
 template<std::size_t KeyBits>
 struct PublicKey
 {
-    BigUInt<KeyBits> e;
     BigUInt<KeyBits> n;
+    BigUInt<KeyBits> e;
 };
 
 template<std::size_t KeyBits>

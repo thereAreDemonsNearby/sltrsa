@@ -18,7 +18,7 @@ mulspeed:
 	$(CXX) -DTestBitLength=$(BITLEN) -O2 -std=c++17 -mavx2 -pthread -lfmt -o test/mulspeed test/testSpeedOfDifferentMultAlgo.cpp fullMultiply_alter.cpp
 
 primegenspeed:
-	$(CXX) -O2 -std=c++17 -pthread -mavx2 -lfmt -o test/primegenspeed test/testPrimegenSpeed.cpp
+	$(CXX) -O2 -std=c++17 -pthread -mavx2 -lfmt -o test/primegenspeed test/testPrimegenSpeed.cpp fullMultiply_alter.cpp
 
 millerRabinTimes:
 	$(CXX) -DTestBitLength=$(BITLEN) -O2 -std=c++17 -lfmt -o test/millerRabinTimes test/testMillerRabinTimes.cpp

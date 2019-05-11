@@ -27,52 +27,56 @@ void test0()
     }
 }
 
-int main()
+template <std::size_t B>
+void testAndCompare()
 {
-    constexpr std::size_t B = 1024;
     auto modulus = BigUInt<B>::randomGenOdd();    
     ContextOfMontgomery<B> mctx(modulus);
     GNKCtx<B> gkctx(modulus);
     auto base = BigUInt<B>::randomGen();
     auto exp = BigUInt<B>::randomGen();
     // auto exp = BigUInt<B>{65537};
+    fmt::print("B={}\n", B);
     BigUInt<B> res1, res2, res3;
     {
         TimerGuard tg("normal");
-        modularExp_montgomery(base, exp, modulus, mctx);
+        for (int i = 0; i < 100; ++i)
+            modularExp_montgomery(base, exp, modulus, mctx);
     }
     {
         TimerGuard tg("comba simd");
+                for (int i = 0; i < 100; ++i)
         modularExp_montgomery<B, Multiplier_comba_simd>(base, exp, modulus, mctx);
     }
     {
         TimerGuard tg("cios");
-        res1 = modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, modulus, mctx);
+                for (int i = 0; i < 100; ++i)
+        modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, modulus, mctx);
     }
     {
         TimerGuard tg("gnk");
+                for (int i = 0; i < 100; ++i)
         modularExp_GNK(base, exp, modulus, gkctx);
     }
     {
         TimerGuard tg("gnk mon ladder");
+                for (int i = 0; i < 100; ++i)
         modularExp_GNK_monLadder(base, exp, modulus, gkctx);
     }
 
     {
         TimerGuard tg("gnk w4");
-        res2 = modularExp_GNK_w4(base, exp, modulus, gkctx);
+                for (int i = 0; i < 100; ++i)
+        modularExp_GNK_w4(base, exp, modulus, gkctx);
     }
-    
-    if (res1 != res2) {
-        fmt::print("error\nres1={0}\nres2={1}\n", res1.toHex(), res2.toHex());
-    } else {
-        fmt::print("equal\n");
-    }
-    // if (res1 != res3) {
-    //     fmt::print("error\nres1={0}\nres3={1}\n", res1.toHex(), res3.toHex());
-    // } else {
-    //     fmt::print("equal\n");
-    // }
+}
+
+int main()
+{
+    testAndCompare<512>();
+    testAndCompare<1024>();
+    testAndCompare<2048>();
+    testAndCompare<4096>();
 }
 
 // g++ -O2 -std=c++17 -mavx2 -lfmt -o testRedundant testRedundant.cpp ../fullMultiply_alter.cpp 

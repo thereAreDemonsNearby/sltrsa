@@ -28,8 +28,7 @@ void genPrime(int loops, int tnmax = 6)
 
 int main()
 {
-    genPrime<512>(100);
-    genPrime<1024>(100);
+    genPrime<512>(50);
+    genPrime<1024>(50);
     genPrime<2048>(50);
-    genPrime<4096>(10);
 }

@@ -2,6 +2,134 @@
 #include <x86intrin.h>
 
 
+namespace rsa
+{
+namespace detail
+{
+
+std::pair<bool, std::vector<uint8_t>>
+parseInt(std::vector<uint8_t> const& bin, std::size_t& idx)
+{
+    std::vector<uint8_t> ret;
+    if (idx < bin.size() && bin[idx] == 0x2) {
+        ++idx;
+        if (idx < bin.size()) {
+            std::size_t intSize = bin[idx];
+            ++idx;
+            if (idx + intSize <= bin.size()) {
+                auto i = idx;
+                while (bin[i] == 0) ++i;
+                idx += intSize;
+                return {true, std::vector<uint8_t>(bin.begin() + i,
+                                                   bin.begin() + i + intSize)};
+            } else
+                return {false, {}};
+        } else
+            return {false, {}};
+    } else
+        return {false, {}};
+}
+
+std::optional<KeyRaw> parseBinary(std::vector<uint8_t> const& bin, KeyRaw::KeyType keyType)
+{
+    std::size_t idx = 0;
+    std::size_t size = bin.size();
+    std::size_t seqSize = 0;
+    KeyRaw ret;
+    ret.type = keyType;
+    // sequence tag
+    if (idx >= size || bin[idx] != 0x30) {
+        return std::nullopt;
+    }
+    ++idx;
+
+    if (bin[idx] <= 0x7F) {
+        seqSize = bin[idx++];
+    } else if (bin[idx] == 0x81) {
+        ++idx;
+        if (idx < size) {
+            seqSize = bin[idx++];
+        } else {
+            return std::nullopt;
+        }
+    } else if (bin[idx] == 0x82) {
+        ++idx;
+        if (idx < size) {
+            seqSize = std::size_t(bin[idx++]) << 8;
+            if (idx < size) {
+                seqSize |= bin[idx++];
+            } else { return std::nullopt; }
+        } else { return std::nullopt; }
+    } else { return std::nullopt; }
+
+    if (keyType == KeyRaw::Private) {
+        // deal with version number
+        if (idx < size && bin[idx] == 0x2) {
+            ++idx;
+            if (idx < size && bin[idx] == 0x1) {
+                ++idx;
+                if (idx < size && bin[idx] == 0x0) {
+                    // rsa version 0
+                    ++idx;
+                } else return std::nullopt;
+            } else return std::nullopt;
+        } else return std::nullopt;
+    }
+
+    while (idx < size && bin[idx] == 0x2) {
+        auto [good, vec] = parseInt(bin, idx);
+        if (good) {
+            ret.numbers.push_back(std::move(vec));
+        } else {
+            return std::nullopt;
+        }
+    }
+
+    return ret;
+}
+
+}
+// text file
+std::optional<KeyRaw> readKeyFile(std::istream& is)
+{
+    KeyRaw::KeyType type;
+    std::string base64Numbers;
+    std::string line;
+    if (!std::getline(is, line))
+        return std::nullopt;
+    if (line == "-----BEGIN RSA PUBLIC KEY-----") {
+        type = KeyRaw::Public;
+        while (std::getline(is, line)) {
+            if (line == "-----END RSA PUBLIC KEY-----") {
+                break;
+            }
+            base64Numbers += line;
+        }           
+    } else if (line == "-----BEGIN RSA PRIVATE KEY-----") {
+        type = KeyRaw::Private;
+        while (std::getline(is, line)) {
+            if (line == "-----END RSA PRIVATE KEY-----") {
+                break;
+            }
+            base64Numbers += line;
+        }        
+    } else {
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> binData;
+    auto [good, end] = util::base64ToBinary(base64Numbers,
+                                            std::back_inserter(binData));
+    if (!good) {
+        return std::nullopt;
+    }
+
+    auto keyRaw = detail::parseBinary(binData, type);
+    return keyRaw;
+}
+
+} // end namespace rsa
+
 namespace sha
 {
 namespace detail

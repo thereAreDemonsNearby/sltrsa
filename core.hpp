@@ -8,10 +8,16 @@
 #include <string>
 #include <vector>
 #include <random>
+#include <optional>
 #include <boost/iostreams/device/array.hpp>
 #include <boost/iostreams/stream.hpp>
+#include <boost/archive/iterators/binary_from_base64.hpp>
+#include <boost/archive/iterators/base64_from_binary.hpp>
+#include <boost/archive/iterators/transform_width.hpp>
 #include "ntalgo.hpp"
+#include "primegen.hpp"
 #include "TimerGuard.h"
+
 
 namespace util
 {
@@ -350,7 +356,8 @@ void PSSEncode(InIter hashBegin, InIter hashEnd,
     // fill db
     std::size_t padSz = len - hashLen - 1 - 1 - saltLen;
     auto it = out;
-    it = std::fill(it, it+padSz, 0);
+    std::fill(it, it+padSz, 0);
+    it += padSz;
     *it++ = 0x1;
     it = std::copy(toBeHashed.begin()+7+hashLen, toBeHashed.end(), it);
 
@@ -373,8 +380,9 @@ enum class PSSDecodeResult
 // input: hash of the original message
 // input: the PSS decoded hash digest
 // verify.
+// will destroy the content in [pssBegin, pssEnd)
 template<typename HashIter, typename PSSIter>
-PSSDecodeResult PSSDecode(HashIter hashBegin, HashIter hashEnd,
+PSSDecodeResult PSSVerify(HashIter hashBegin, HashIter hashEnd,
                           PSSIter pssBegin, PSSIter pssEnd)
 {
     const std::size_t hashLen = 32; // sha256
@@ -413,7 +421,42 @@ PSSDecodeResult PSSDecode(HashIter hashBegin, HashIter hashEnd,
         return PSSDecodeResult::HashValueError;
     }
 
-    return Ok;
+    return PSSDecodeResult::Ok;
+}
+
+template <typename OutIt>
+std::pair<bool, OutIt> base64ToBinary(std::string const& base64, OutIt out)
+{
+    using namespace boost::archive::iterators;
+    using DecIt = transform_width<binary_from_base64<const char*>, 8, 6>;
+    auto size = base64.size();
+    if (size && base64[size-1] == '=')
+        --size;
+    if (size && base64[size-1] == '=')
+        --size;
+    if (size == 0) {
+        return {true, out};
+    }
+
+    try {
+        auto end = std::copy(DecIt(base64.data()), DecIt(base64.data()+size),
+                             out);
+        return {true, end};
+    } catch (...) {
+        return {false, out};
+    }
+}
+
+template<typename InIt>
+std::string binaryToBase64(InIt begin, InIt end)
+{
+    using namespace boost::archive::iterators;
+    using EncIt = base64_from_binary<transform_width<InIt, 6, 8>>;
+    std::string ret;
+    std::copy(EncIt(begin), EncIt(end), std::back_inserter(ret));
+    while (ret.size() % 4 != 0)
+        ret.push_back('=');
+    return ret;
 }
 
 
@@ -422,7 +465,64 @@ PSSDecodeResult PSSDecode(HashIter hashBegin, HashIter hashEnd,
 namespace rsa
 {
 
+// big endian conversion between integer and byte sequence
+template<std::size_t B, typename ByteIter>
+BigUInt<B> bytesToBigUInt(ByteIter begin, ByteIter end)
+{
+    while (begin != end && *begin == 0)
+        ++begin;
+    if (begin == end)
+        return {}; // 0
 
+    std::size_t byteCnt = end - begin;
+    BigUInt<B> ret;
+    std::size_t i = 0;
+    while (begin <= end - 4) {
+        ret[i++] = util::bytesToU32BigEndian(end - 4);
+        end -= 4;
+    }
+
+    uint32_t last = 0;
+    for (std::size_t shift = 0; begin < end; shift += 8, --end) {
+        last |= uint32_t(*(end - 1)) << shift;
+    }
+    ret[i++] = last;
+
+    return ret;
+}
+
+template<std::size_t B, typename ByteIter>
+ByteIter BigUIntToBytes(BigUInt<B> const& bi, ByteIter begin)
+{
+    int i = BigUInt<B>::VLEN - 1;
+    while (i >= 0 && bi[i] == 0)
+        --i;
+    if (i < 0) {
+        *begin++ = 0;
+        return begin;
+    } else {
+        uint8_t buf[4];
+        util::u32ToBytesBigEndian(bi[i], buf);
+        int j = 0;
+        while (buf[j] == 0) ++j;
+        while (j < 4) {
+            *begin++ = buf[j];
+            ++j;
+        }
+        --i;
+    }
+
+    while (i >= 0) {
+        uint8_t buf[4];
+        util::u32ToBytesBigEndian(bi[i], buf);
+        for (int j = 0; j < 4; ++j) {
+            *begin++ = buf[j];
+        }
+        --i;
+    }
+
+    return begin;
+}
 
 template<std::size_t KeyBits>
 struct PublicKey
@@ -434,15 +534,162 @@ struct PublicKey
 template<std::size_t KeyBits>
 struct PrivateKey
 {
-    BigUInt<KeyBits> d;
     BigUInt<KeyBits> n;
+    BigUInt<KeyBits> e;
+    BigUInt<KeyBits> d;
     BigUInt<KeyBits/2> p;
     BigUInt<KeyBits/2> q;
-    BigUInt<KeyBits/2> pInv;
-    BigUInt<KeyBits/2> qInv;
-    BigUInt<KeyBits/2> d1;
-    BigUInt<KeyBits/2> d2;
+    BigUInt<KeyBits/2> d1; // d mod (p-1)
+    BigUInt<KeyBits/2> d2; // d mod (q-1)
+    BigUInt<KeyBits/2> qInv; // q^(-1) mod p
 };
+
+struct KeyRaw
+{
+    enum KeyType {Public, Private};
+    KeyType type;
+    std::vector<std::vector<uint8_t>> numbers;
+};
+
+template<std::size_t KeyBits>
+PublicKey<KeyBits> keyRawToPublicKey(KeyRaw const& raw)
+{
+    assert(raw.numbers[0].size() * 8 == KeyBits);
+    PublicKey<KeyBits> key;
+    key.n = bytesToBigUInt<KeyBits>(raw.numbers[0].begin(), raw.numbers[0].end());
+    key.e = bytesToBigUInt<KeyBits>(raw.numbers[1].begin(), raw.numbers[1].end());
+    return key;
+}
+
+template<std::size_t KeyBits>
+PrivateKey<KeyBits> keyRawToPrivateKey(KeyRaw const& raw)
+{
+    assert(raw.numbers[0].size() * 8 == KeyBits);
+    PrivateKey<KeyBits> key;
+    key.n = bytesToBigUInt<KeyBits>(raw.numbers[0].begin(), raw.numbers[0].end());
+    key.e = bytesToBigUInt<KeyBits>(raw.numbers[1].begin(), raw.numbers[1].end());
+    key.d = bytesToBigUInt<KeyBits>(raw.numbers[2].begin(), raw.numbers[2].end());
+    key.p = bytesToBigUInt<KeyBits>(raw.numbers[3].begin(), raw.numbers[3].end());
+    key.q = bytesToBigUInt<KeyBits>(raw.numbers[4].begin(), raw.numbers[4].end());
+    key.d1 = bytesToBigUInt<KeyBits>(raw.numbers[5].begin(), raw.numbers[5].end());
+    key.d2 = bytesToBigUInt<KeyBits>(raw.numbers[6].begin(), raw.numbers[6].end());
+    key.qInv = bytesToBigUInt<KeyBits>(raw.numbers[7].begin(), raw.numbers[7].end());
+    return key;
+}
+
+namespace detail
+{
+template<std::size_t B>
+void insertInteger(std::vector<uint8_t>& bin, BigUInt<B> const& bi)
+{
+    bin.push_back(0x2);
+    std::vector<uint8_t> biBin;
+    BigUIntToBytes(bi, std::back_inserter(biBin));
+    bin.push_back(biBin.size());
+    bin.insert(bin.end(), biBin.begin(), biBin.end());
+}
+}
+
+std::optional<KeyRaw> readKeyFile(std::istream&);
+template<std::size_t KeyBits>
+void writePublicKey(std::ostream& os, PublicKey<KeyBits> const& key)
+{
+    os << "-----BEGIN RSA PUBLIC KEY-----\n";
+
+    std::vector<uint8_t> derData;
+    derData.push_back(0x30);
+    derData.push_back(0x82);
+    derData.push_back(0x00);
+    derData.push_back(0x00);
+
+    std::vector<uint8_t> derDataBody;
+    detail::insertInteger(derDataBody, key.n);
+    detail::insertInteger(derDataBody, key.e);
+
+    derData[2] = (derDataBody.size() >> 8) & 0xff;
+    derData[3] = derDataBody.size() & 0xff;
+    derData.insert(derData.end(), derDataBody.begin(), derDataBody.end());
+
+    os << util::binaryToBase64(derData.begin(), derData.end());
+    
+    os << "\n-----END RSA PUBLIC KEY-----\n";
+}
+
+template<std::size_t KeyBits>
+void writePrivateKey(std::ostream& os, PrivateKey<KeyBits> const& key)
+{
+    os << "-----BEGIN RSA PRIVATE KEY-----\n";
+
+    std::vector<uint8_t> derData;
+    derData.push_back(0x30);
+    derData.push_back(0x82);
+    derData.push_back(0x00);
+    derData.push_back(0x00);
+    
+    std::vector<uint8_t> derDataBody;
+    // version
+    derDataBody.push_back(0x2);
+    derDataBody.push_back(0x1);
+    derDataBody.push_back(0x0);
+    detail::insertInteger(derDataBody, key.n);
+    detail::insertInteger(derDataBody, key.e);
+    detail::insertInteger(derDataBody, key.d);
+    detail::insertInteger(derDataBody, key.p);
+    detail::insertInteger(derDataBody, key.q);
+    detail::insertInteger(derDataBody, key.d1);
+    detail::insertInteger(derDataBody, key.d2);
+    detail::insertInteger(derDataBody, key.qInv);
+
+    derData[2] = (derDataBody.size() >> 8) & 0xff;
+    derData[3] = derDataBody.size() & 0xff;
+    derData.insert(derData.end(), derDataBody.begin(), derDataBody.end());
+
+    os << util::binaryToBase64(derData.begin(), derData.end());
+    
+    os << "\n-----END RSA PRIVATE KEY-----\n";
+}
+
+template<std::size_t KeyBits>
+PrivateKey<KeyBits> keyGen(int threadNum)
+{
+    auto diff = [](BigUInt<KeyBits/2> const& a,
+                   BigUInt<KeyBits/2> const& b) {
+        if (a > b) return a - b;
+        else return b - a;
+    };
+        
+    BigUInt<KeyBits/2> minDiffAllowed{}; // 2^(KeyBits/4+1)
+    minDiffAllowed[KeyBits/4/32] = 2;
+    BigUInt<KeyBits> minDAllowed{};
+    minDAllowed[KeyBits/4/32] = 1;
+    minDAllowed = (minDAllowed + BigUInt<KeyBits>(2)) / BigUInt<KeyBits>(3);
+    PrivateKey<KeyBits> key;
+    key.e = BigUInt<KeyBits>{65537};
+    bool done = false;
+    while (!done) {
+        key.p = primeGen_par<KeyBits/2>(threadNum);
+        key.q = primeGen_par<KeyBits/2>(threadNum);
+        if (diff(key.p, key.q) >= minDiffAllowed) {
+            key.n = fullMultiply_comba_simd(key.p, key.q);
+            if (modInverse(key.e,
+                           fullMultiply_comba_simd(key.p-1, key.q-1),
+                           key.d)) {
+                if (key.d >= minDAllowed) {
+                    done = true;
+                    key.d1 = modLess(key.d, key.p-1);
+                    key.d2 = modLess(key.d, key.q-1);
+                    modInverse(key.q, key.p, key.qInv);
+                } else {
+                    fmt::print("d fail\n");
+                }
+            }
+        } else {
+            fmt::print("diff fail\n");
+        }
+    }
+
+    return key;
+}
 
 
 template<std::size_t KeyBits>

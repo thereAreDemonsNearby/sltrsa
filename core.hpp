@@ -211,11 +211,23 @@ void mgf1(InIter seedBegin, InIter seedEnd, OutIter maskBegin, OutIter maskEnd)
     assert(maskBegin == maskEnd);   
 }
 
+enum class Error
+{
+    LengthError,
+    FormatError,
+    LabelError,
+    HashError,
+    Ok,
+};
+
+static char const* errorToString[] = {"LengthError",
+                                "FormatError", "LabelError",
+                                "HashError", "Ok"};
 // [begin, end) : original message
 // [out, out+len) : the encoded message
 template<typename InIter, typename OutIter>
-void OAEPEncode(InIter begin, InIter end,
-                OutIter out, std::size_t len)
+Error OAEPEncode(InIter begin, InIter end,
+                 OutIter out, std::size_t len)
 {
     // use empty label
     // use sha256 as the optional hash function
@@ -228,7 +240,7 @@ void OAEPEncode(InIter begin, InIter end,
     std::size_t hashLen = 32;
     std::size_t msgLen = end - begin;
     if (msgLen > len - 2 * hashLen - 2) {
-        assert(false && "message too long");
+        return Error::LengthError;
     }
     // format:
     // [out, out+1) : 0x00
@@ -262,16 +274,17 @@ void OAEPEncode(InIter begin, InIter end,
     std::transform(seedMask.begin(), seedMask.end(),
                    out+1, out+1,
                    [](uint8_t a, uint8_t b){ return a ^ b; });
-    // done   
+    // done
+    return Error::Ok;
 }
 
 
-// return value: pair(OutIter, bool)
-// stands for (end iterator for output, valid format?)
+// return value: pair(bool, OutIter)
+// stands for (valid format?, end iterator for output)
 // [begin, end): encoded message
 // [out, ...): the original message
 template<typename InIter, typename OutIter>
-std::pair<bool, OutIter> OAEPDecode(InIter begin, InIter end,
+std::pair<Error, OutIter> OAEPDecode(InIter begin, InIter end,
                                     OutIter out)
 {
     uint8_t emptyHash[] = {
@@ -288,10 +301,10 @@ std::pair<bool, OutIter> OAEPDecode(InIter begin, InIter end,
     // [begin+1, begin+1+hLen) : masked seed
     // [begin+1+hLen, begin+len) : masked db
     if (len < 2 * hashLen + 2) {
-        return {false, out};
+        return {Error::LengthError, out};
     }
     if (begin[0] != 0x00) {
-        return {false, out};
+        return {Error::FormatError, out};
     }
 
     // masked seed to seed:
@@ -309,7 +322,7 @@ std::pair<bool, OutIter> OAEPDecode(InIter begin, InIter end,
     if (!std::equal(std::begin(emptyHash), std::end(emptyHash),
                    begin+1+hashLen, begin+1+2*hashLen)) {
         // label hash is wrong
-        return {false, out};
+        return {Error::LabelError, out};
     }
     
     auto it = begin+1+2*hashLen;
@@ -318,13 +331,13 @@ std::pair<bool, OutIter> OAEPDecode(InIter begin, InIter end,
     }
 
     if (it == end || *it != 0x1) {
-        return {false, out};
+        return {Error::FormatError, out};
     }
     ++it; // skip 0x1
 
     // copy message to out
     out = std::copy(it, end, out);
-    return {true, out};
+    return {Error::Ok, out};
 }
 
 // input: hash of the original message
@@ -332,14 +345,14 @@ std::pair<bool, OutIter> OAEPDecode(InIter begin, InIter end,
 // output: pss encoded hash
 //         [out, out+len)
 template<typename InIter, typename OutIter>
-void PSSEncode(InIter hashBegin, InIter hashEnd,
+Error PSSEncode(InIter hashBegin, InIter hashEnd,
                OutIter out, std::size_t len,
                std::size_t saltLen)
 {
     // choose sha256 as the optional hash function
     constexpr std::size_t hashLen = 32;
     if (len < 2 + saltLen + hashLen) {
-        assert(false && "hash or salt too long");
+        return Error::LengthError;
     }
 
     // format:
@@ -356,7 +369,7 @@ void PSSEncode(InIter hashBegin, InIter hashEnd,
     // fill db
     std::size_t padSz = len - hashLen - 1 - 1 - saltLen;
     auto it = out;
-    std::fill(it, it+padSz, 0);
+    std::fill(it, it+padSz, 0x0);
     it += padSz;
     *it++ = 0x1;
     it = std::copy(toBeHashed.begin()+7+hashLen, toBeHashed.end(), it);
@@ -369,26 +382,22 @@ void PSSEncode(InIter hashBegin, InIter hashEnd,
     mgf1(it - hashLen, it, dbMask.begin(), dbMask.end());
     std::transform(dbMask.begin(), dbMask.end(), out, out,
                    [](uint8_t a, uint8_t b){ return a^b; });
-
     *it++ = 0xbc;
+    *out &= 0x1f; // let the leading two bits be zero
+    return Error::Ok;
 }
-
-enum class PSSDecodeResult
-{
-    FormatError, HashValueError, Ok
-};
 // input: hash of the original message
-// input: the PSS decoded hash digest
+// input: the PSS encoded hash digest
 // verify.
 // will destroy the content in [pssBegin, pssEnd)
 template<typename HashIter, typename PSSIter>
-PSSDecodeResult PSSVerify(HashIter hashBegin, HashIter hashEnd,
-                          PSSIter pssBegin, PSSIter pssEnd)
+Error PSSVerify(HashIter hashBegin, HashIter hashEnd,
+                PSSIter pssBegin, PSSIter pssEnd)
 {
     const std::size_t hashLen = 32; // sha256
     std::size_t len = pssEnd - pssBegin;
     if (pssBegin[len-1] != 0xbc) {
-        return PSSDecodeResult::FormatError;
+        return Error::FormatError;
     }
 
     std::vector<uint8_t> dbMask(len - 1 - hashLen);
@@ -398,13 +407,14 @@ PSSDecodeResult PSSVerify(HashIter hashBegin, HashIter hashEnd,
     std::transform(dbMask.begin(), dbMask.end(),
                    pssBegin, pssBegin,
                    [](uint8_t a, uint8_t b){ return a^b; });
+    *pssBegin &= 0x1f; // set the leading two bits to zero
     std::size_t saltLen;
     auto it = pssBegin;
     for (; it != pssBegin+len-hashLen-1 && *it == 0x0; ++it) {
         ;
     }
     if (it == pssBegin + len - hashLen - 1 || *it != 0x1) {
-        return PSSDecodeResult::FormatError;
+        return Error::FormatError;
     }
     ++it;
     auto saltBegin = it;
@@ -418,11 +428,13 @@ PSSDecodeResult PSSVerify(HashIter hashBegin, HashIter hashEnd,
     sha::fileDigest_sha256(toBeHashed.begin(), toBeHashed.end(), hash.begin());
 
     if (!std::equal(pssBegin+len-hashLen-1, pssBegin+len-1, hash.begin())) {
-        return PSSDecodeResult::HashValueError;
+        return Error::HashError;
     }
 
-    return PSSDecodeResult::Ok;
+    return Error::Ok;
 }
+
+
 
 template <typename OutIt>
 std::pair<bool, OutIt> base64ToBinary(std::string const& base64, OutIt out)
@@ -464,7 +476,6 @@ std::string binaryToBase64(InIt begin, InIt end)
 
 namespace rsa
 {
-
 // big endian conversion between integer and byte sequence
 template<std::size_t B, typename ByteIter>
 BigUInt<B> bytesToBigUInt(ByteIter begin, ByteIter end)
@@ -491,8 +502,25 @@ BigUInt<B> bytesToBigUInt(ByteIter begin, ByteIter end)
     return ret;
 }
 
+// reverses leading zero to protect encoding structure
 template<std::size_t B, typename ByteIter>
 ByteIter BigUIntToBytes(BigUInt<B> const& bi, ByteIter begin)
+{
+    int i = BigUInt<B>::VLEN - 1;   
+    while (i >= 0) {
+        uint8_t buf[4];
+        util::u32ToBytesBigEndian(bi[i], buf);
+        for (int j = 0; j < 4; ++j) {
+            *begin++ = buf[j];
+        }
+        --i;
+    }
+
+    return begin;
+}
+
+template<std::size_t B, typename ByteIter>
+ByteIter BigUIntToBytesTrim(BigUInt<B> const& bi, ByteIter begin)
 {
     int i = BigUInt<B>::VLEN - 1;
     while (i >= 0 && bi[i] == 0)
@@ -511,7 +539,6 @@ ByteIter BigUIntToBytes(BigUInt<B> const& bi, ByteIter begin)
         }
         --i;
     }
-
     while (i >= 0) {
         uint8_t buf[4];
         util::u32ToBytesBigEndian(bi[i], buf);
@@ -520,7 +547,6 @@ ByteIter BigUIntToBytes(BigUInt<B> const& bi, ByteIter begin)
         }
         --i;
     }
-
     return begin;
 }
 
@@ -577,6 +603,91 @@ PrivateKey<KeyBits> keyRawToPrivateKey(KeyRaw const& raw)
     return key;
 }
 
+template<std::size_t KeyBits>
+BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
+    BigUInt<KeyBits> const& cipher, PrivateKey<KeyBits> const& key,
+    GNKCtx<KeyBits/2> const& pContext,
+    GNKCtx<KeyBits/2> const& qContext,
+    bool par = false);
+
+template<std::size_t B, typename InIter, typename OutIter>
+std::pair<util::Error, OutIter>
+encrypt(PublicKey<B>& key, InIter begin, InIter end, OutIter out)
+{
+    std::vector<uint8_t> encoded(B/8);
+    util::Error err = util::OAEPEncode(begin, end, encoded.begin(), B/8);
+    if (err != util::Error::Ok)
+        return {err, out};
+    BigUInt<B> bi = bytesToBigUInt<B>(encoded.begin(), encoded.end());
+    BigUInt<B> encrypted = modularExp_GNK(bi, key.e, key.n, GNKCtx<B>(key.n));    
+    auto outEnd = BigUIntToBytes(encrypted, out);
+    return {util::Error::Ok, outEnd};
+}
+
+template<std::size_t B, typename InIter, typename OutIter>
+std::pair<util::Error, OutIter>
+decrypt(PrivateKey<B>& key, InIter begin, InIter end, OutIter out)
+{
+    if (end - begin > B/8) {
+        return {util::Error::LengthError, out};
+    }
+    BigUInt<B> cipher = bytesToBigUInt<B>(begin, end);
+    BigUInt<B> decrypted = decryptUsingChineseRemainderTheorem(
+        cipher, key, GNKCtx<B/2>(key.p), GNKCtx<B/2>(key.q));
+    std::vector<uint8_t> encoded(B/8);
+    BigUIntToBytes(decrypted, encoded.begin());
+    return util::OAEPDecode(encoded.begin(), encoded.end(), out);
+}
+
+template<std::size_t B, typename InIter, typename OutIter>
+std::pair<util::Error, OutIter>
+sign(PrivateKey<B>& key, InIter begin, InIter end, OutIter out)
+{
+    // use sha256
+    util::Error e;
+    std::vector<uint8_t> hashVal(256/8);
+    sha::fileDigest_sha256(begin, end, hashVal.begin());
+    std::vector<uint8_t> pss(B/8, 0);
+    e = util::PSSEncode(hashVal.begin(), hashVal.end(), pss.begin(), B/8, 16);
+    if (e != util::Error::Ok)
+        return {e, out};
+    BigUInt<B> pssBi = bytesToBigUInt<B>(pss.begin(), pss.end());
+    // for (auto e : pss) {
+    //     fmt::print("0x{:02x}:", e);
+    // }
+    // fmt::print("\n");
+    // fmt::print("pssBi significant:{}\n", pssBi.countSignificand());
+    // fmt::print("key.n significant:{}\n", key.n.countSignificand());
+    // if (pssBi >= key.n) {
+
+    //     throw 0;
+    // }
+    // fmt::print("pssBi={}\n", pssBi.toHex());
+    BigUInt<B> enc = decryptUsingChineseRemainderTheorem(
+        pssBi, key, GNKCtx<B/2>(key.p), GNKCtx<B/2>(key.q));
+    return {util::Error::Ok, BigUIntToBytes(enc, out)};
+}
+
+template<std::size_t B, typename MsgIter, typename SignatureIter>
+util::Error verify(PublicKey<B>& key, MsgIter begin, MsgIter end,
+                   SignatureIter sbegin, SignatureIter send)
+{
+    util::Error e;
+    std::vector<uint8_t> hashVal(256/8);
+    sha::fileDigest_sha256(begin, end, hashVal.begin());
+    
+    BigUInt<B> signatureBi = bytesToBigUInt<B>(sbegin, send);
+    BigUInt<B> pssBi = modularExp_GNK(signatureBi, key.e, key.n, GNKCtx<B>(key.n));
+    // fmt::print("pssBi={}\n", pssBi.toHex());
+    std::vector<uint8_t> pss(B/8);
+    BigUIntToBytes(pssBi, pss.begin());
+    return util::PSSVerify(hashVal.begin(), hashVal.end(), pss.begin(), pss.end());
+}
+
+
+// used for file manip
+
+
 namespace detail
 {
 template<std::size_t B>
@@ -584,8 +695,18 @@ void insertInteger(std::vector<uint8_t>& bin, BigUInt<B> const& bi)
 {
     bin.push_back(0x2);
     std::vector<uint8_t> biBin;
-    BigUIntToBytes(bi, std::back_inserter(biBin));
-    bin.push_back(biBin.size());
+    BigUIntToBytesTrim(bi, std::back_inserter(biBin));
+    auto size = biBin.size();
+    if (size <= 0x7f) {
+        bin.push_back((uint8_t)size);
+    } else if (size <= 0xff) {
+        bin.push_back(0x81);
+        bin.push_back((uint8_t)size);
+    } else {
+        bin.push_back(0x82);
+        bin.push_back((size >> 8) & 0xff);
+        bin.push_back(size & 0xff);
+    }
     bin.insert(bin.end(), biBin.begin(), biBin.end());
 }
 }
@@ -644,6 +765,11 @@ void writePrivateKey(std::ostream& os, PrivateKey<KeyBits> const& key)
     derData[3] = derDataBody.size() & 0xff;
     derData.insert(derData.end(), derDataBody.begin(), derDataBody.end());
 
+    // for (auto e : derData) {
+    //     fmt::print("{:02x}:", e);
+    // }
+    // fmt::print("\n");
+
     os << util::binaryToBase64(derData.begin(), derData.end());
     
     os << "\n-----END RSA PRIVATE KEY-----\n";
@@ -691,10 +817,6 @@ PrivateKey<KeyBits> keyGen(int threadNum)
     return key;
 }
 
-
-template<std::size_t KeyBits>
-std::vector<std::byte> encryptBlock(std::vector<std::byte>&);
-
 template<std::size_t KeyBits>
 void encryptFile(std::FILE* src, std::FILE* dst, PublicKey<KeyBits> const& key, int threadNum = 1);
 template<std::size_t KeyBits>
@@ -708,13 +830,6 @@ template<std::size_t KeyBits>
 void decryptFile_serial(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key);
 template<std::size_t KeyBits>
 void decryptFile_par(std::FILE* src, std::FILE* dst, PrivateKey<KeyBits> const& key, int threadNum);
-
-template<std::size_t KeyBits>
-BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
-    BigUInt<KeyBits> const& cipher, PrivateKey<KeyBits> const& key,
-    GNKCtx<KeyBits/2> const& pContext,
-    GNKCtx<KeyBits/2> const& qContext,
-    bool par = false);
 
 }
 
@@ -1000,13 +1115,13 @@ BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
         BigUInt<KeyBits/2> m1, m2;
         auto fut1 = std::async([&cipher, &key, &pContext, &m1](){
             auto cipher1 = modLess(cipher, key.p);          
-            m1 = modularExp_GNK
+            m1 = modularExp_GNK_w4
                 (cipher1, key.d1, key.p, pContext);
         });
 
         auto fut2 = std::async([&cipher, &key, &qContext, &m2](){
             auto cipher2 = modLess(cipher, key.q);
-            m2 = modularExp_GNK
+            m2 = modularExp_GNK_w4
                 (cipher2, key.d2, key.q, qContext);
         });
         fut1.wait();
@@ -1026,9 +1141,9 @@ BigUInt<KeyBits> decryptUsingChineseRemainderTheorem(
         // return modLess(m, key.n);
         
         auto cipher1 = modLess(cipher, key.p);
-        auto m1 = modularExp_GNK(cipher1, key.d1, key.p, pContext);
+        auto m1 = modularExp_GNK_w4(cipher1, key.d1, key.p, pContext);
         auto cipher2 = modLess(cipher, key.q);
-        auto m2 = modularExp_GNK(cipher2, key.d2, key.q, qContext);
+        auto m2 = modularExp_GNK_w4(cipher2, key.d2, key.q, qContext);
         auto h = modLess(fullMultiply(key.qInv,
                                       signedMod(std::move(m1).template resizeMove<KeyBits/2+32>() - m2.template resize<KeyBits/2+32>(), key.p.template resize<KeyBits/2+32>()).template resizeMove<KeyBits/2>()), key.p);
         auto m = m2.template resize<KeyBits>() + fullMultiply(h, key.q);

@@ -14,14 +14,29 @@ parseInt(std::vector<uint8_t> const& bin, std::size_t& idx)
     if (idx < bin.size() && bin[idx] == 0x2) {
         ++idx;
         if (idx < bin.size()) {
-            std::size_t intSize = bin[idx];
-            ++idx;
+            std::size_t intSize = 0;
+            if (bin[idx] <= 0x7f) {
+                intSize = bin[idx++];
+            } else if (bin[idx] == 0x81) {
+                ++idx;
+                if (idx < bin.size()) {
+                    intSize = bin[idx++];
+                } else
+                    return {false, {}};
+            } else if (bin[idx] == 0x82) {
+                if (idx + 2 >= bin.size())
+                    return {false, {}};
+                intSize = (uint32_t(bin[idx+1]) << 8) | bin[idx+2];
+                idx += 3;
+            } else
+                return {false, {}};
             if (idx + intSize <= bin.size()) {
                 auto i = idx;
-                while (bin[i] == 0) ++i;
+                auto i2 = idx;
+                while (i < idx + intSize && bin[i] == 0) ++i;
                 idx += intSize;
                 return {true, std::vector<uint8_t>(bin.begin() + i,
-                                                   bin.begin() + i + intSize)};
+                                                   bin.begin() + i2 + intSize)};
             } else
                 return {false, {}};
         } else

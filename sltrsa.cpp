@@ -34,6 +34,9 @@ void verifyFile(rsa::PublicKey<B>& key, std::istream& fis,
 
 std::vector<uint8_t> parseDigest(std::string const& str);
 
+template<std::size_t B>
+void speedTest();
+
 int main(int argc, char* argv[])
 {
     namespace bpo = boost::program_options;
@@ -378,7 +381,10 @@ int main(int argc, char* argv[])
         }
 
     } else if (strcmp(argv[1], "speed") == 0) {
-        fmt::print("not implemented yet\n");
+        // fmt::print("not implemented yet\n");
+        speedTest<1024>();
+        speedTest<2048>();
+        speedTest<4096>();
     } else {
         fmt::print(stderr, "help informations(TODO)\n");
     }
@@ -479,4 +485,35 @@ std::vector<uint8_t> parseDigest(std::string const& str)
         dgst.push_back(two2one(str[i], str[i+1]));
     }
     return dgst;
+}
+
+template<std::size_t B>
+void speedTest()
+{
+    util::Error e;
+    rsa::PrivateKey<B> key = rsa::keyGen<B>(6);
+    std::vector<uint8_t> msg(250);
+    util::randomGenBytes(msg.begin(), msg.end());
+    std::vector<uint8_t> hashVal(256/8);
+    sha::fileDigest_sha256(msg.begin(), msg.end(), hashVal.begin());
+    GNKCtx<B/2> pCtx(key.p), qCtx(key.q);
+    size_t cnt = 0;
+    double tm;
+    {
+        TimerGuard tg("", TimerGuard::Delay{});
+        while (tg.sum() < 10.0) {
+            tg.resume();
+            cnt++;
+            std::vector<uint8_t> pss(B/8, 0);
+            util::PSSEncode(hashVal.begin(), hashVal.end(), pss.begin(), B/8, 16);    
+            BigUInt<B> pssBi = rsa::bytesToBigUInt<B>(pss.begin(), pss.end());
+            std::array<uint8_t, B/8> bytes;
+            BigUInt<B> enc = rsa::decryptUsingChineseRemainderTheorem(
+                pssBi, key, pCtx, qCtx);
+            rsa::BigUIntToBytes(enc, bytes.begin());
+            tg.stop();
+        }
+        tm = tg.sum();
+    }
+    fmt::print(stderr, "do rsa-{0} signature {1} times in {2} seconds\n", B, cnt, tm);
 }

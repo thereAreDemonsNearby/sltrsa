@@ -502,7 +502,7 @@ BigUInt<B> bytesToBigUInt(ByteIter begin, ByteIter end)
     return ret;
 }
 
-// reverses leading zero to protect encoding structure
+// reserve leading zero's to protect encoding structure
 template<std::size_t B, typename ByteIter>
 ByteIter BigUIntToBytes(BigUInt<B> const& bi, ByteIter begin)
 {
@@ -519,6 +519,7 @@ ByteIter BigUIntToBytes(BigUInt<B> const& bi, ByteIter begin)
     return begin;
 }
 
+// discard leading zero's. for key generating
 template<std::size_t B, typename ByteIter>
 ByteIter BigUIntToBytesTrim(BigUInt<B> const& bi, ByteIter begin)
 {

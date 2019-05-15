@@ -40,33 +40,33 @@ void testAndCompare()
     BigUInt<B> res1, res2, res3;
     {
         TimerGuard tg("normal");
-        for (int i = 0; i < 100; ++i)
+//        for (int i = 0; i < 100; ++i)
             modularExp_montgomery(base, exp, modulus, mctx);
     }
     {
         TimerGuard tg("comba simd");
-                for (int i = 0; i < 100; ++i)
+        // for (int i = 0; i < 100; ++i)
         modularExp_montgomery<B, Multiplier_comba_simd>(base, exp, modulus, mctx);
     }
     {
         TimerGuard tg("cios");
-                for (int i = 0; i < 100; ++i)
+        //              for (int i = 0; i < 100; ++i)
         modularExp_montgomery_alter<B, MontMultiplier_cios>(base, exp, modulus, mctx);
     }
     {
         TimerGuard tg("gnk");
-                for (int i = 0; i < 100; ++i)
+        //      for (int i = 0; i < 100; ++i)
         modularExp_GNK(base, exp, modulus, gkctx);
     }
     {
         TimerGuard tg("gnk mon ladder");
-                for (int i = 0; i < 100; ++i)
+        //      for (int i = 0; i < 100; ++i)
         modularExp_GNK_monLadder(base, exp, modulus, gkctx);
     }
 
     {
         TimerGuard tg("gnk w4");
-                for (int i = 0; i < 100; ++i)
+        //      for (int i = 0; i < 100; ++i)
         modularExp_GNK_w4(base, exp, modulus, gkctx);
     }
 }

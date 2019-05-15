@@ -674,7 +674,7 @@ BigUInt<B> modularExp_GNK_w4(BigUInt<B> const& base, BigUInt<B> const& exp,
 
         result = montMul_GNK(result, table[windows[i]], modulusRF, ctx);
     }
-    // convert from montgomery form to the original form
+    // convert from montgomery form to original form
     result = montMul_GNK(result, one, modulusRF, ctx);
     return redundantFormToBase32<B>(result, GNKCtx<B>::radix);
 }

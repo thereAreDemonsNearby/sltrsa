@@ -31,8 +31,12 @@ public:
         stopped_ = false;
         start_ = std::chrono::system_clock::now();
     }
+
+    double sum() const {
+        return sum_;
+    }
 private:
-    std::chrono::system_clock::time_point start_;
+    std::chrono::high_resolution_clock::time_point start_;
     std::string description_;
     std::ostream& os_;
     bool stopped_;

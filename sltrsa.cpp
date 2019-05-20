@@ -381,7 +381,7 @@ int main(int argc, char* argv[])
         }
 
     } else if (strcmp(argv[1], "speed") == 0) {
-        // fmt::print("not implemented yet\n");
+        fmt::print("Test signing times in 10s:\n");
         speedTest<1024>();
         speedTest<2048>();
         speedTest<4096>();
@@ -500,7 +500,7 @@ void speedTest()
     size_t cnt = 0;
     double tm;
     {
-        TimerGuard tg("", TimerGuard::Delay{});
+        TimerGuard tg("", TimerGuard::Delay{}, std::cerr);
         while (tg.sum() < 10.0) {
             tg.resume();
             cnt++;
@@ -508,6 +508,8 @@ void speedTest()
             util::PSSEncode(hashVal.begin(), hashVal.end(), pss.begin(), B/8, 16);    
             BigUInt<B> pssBi = rsa::bytesToBigUInt<B>(pss.begin(), pss.end());
             std::array<uint8_t, B/8> bytes;
+            // BigUInt<B> enc = rsa::decryptUsingChineseRemainderTheorem(
+            //     pssBi, key, GNKCtx<B/2>(key.p), GNKCtx<B/2>(key.q));
             BigUInt<B> enc = rsa::decryptUsingChineseRemainderTheorem(
                 pssBi, key, pCtx, qCtx);
             rsa::BigUIntToBytes(enc, bytes.begin());

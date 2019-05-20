@@ -473,7 +473,7 @@ public:
     // in which k = ceil(B/radix)
     // rr = r^2 mod modulus
     BigUInt<B> rr;
-
+    
     GNKCtx(BigUInt<B> const& modulus);
 };
 
@@ -727,12 +727,27 @@ GNKCtx<B>::GNKCtx(BigUInt<B> const& modulus)
 
     rr = modLess(fullMultiply_comba_simd(r, r), modulus);
 
-    auto [gcdv, x, y] = exgcd(modulus.template resize<B+32>(), r);
-    x = signedMod(-x, r); // y*r - x*modulus == 1
-//  y = signedMod(y, modulus.template resize<B+32>());
+    uint32_t y = 1;
+    uint32_t z = 2;
+    uint32_t msk = 3; // 0b11
+    uint32_t m0 = modulus[0];
+    for (int i = 2; i <= 32; ++i) {
+        if (((m0 * y) & msk) < z) {
+            // do nothing
+        } else {
+            y += z;
+        }
+        z *= 2;
+        msk = (msk << 1) + 1;
+    }
+    x0 = -y;
     
-    x0 = x[0];
-//    assert(fullMultiply(y, r) - fullMultiply(x, modulus.template resize<B+32>()) == 1);
+//     auto [gcdv, x, y] = exgcd(modulus.template resize<B+32>(), r);
+//     x = signedMod(-x, r); // y*r - x*modulus == 1
+// //  y = signedMod(y, modulus.template resize<B+32>());
+    
+//     x0 = x[0];
+// //    assert(fullMultiply(y, r) - fullMultiply(x, modulus.template resize<B+32>()) == 1);
 }
 
 template<std::size_t B>

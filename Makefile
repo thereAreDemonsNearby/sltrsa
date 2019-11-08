@@ -1,6 +1,6 @@
 CXX = g++
 BITLEN = 2048
-all: sltrsa sltrsa_keygen
+all: sltrsa
 sltrsa: sltrsa.cpp biguint.hpp ntalgo.hpp core.hpp core.cpp
 	$(CXX) -O3 -std=c++17 -o bin/sltrsa sltrsa.cpp fullMultiply_alter.cpp core.cpp -pthread -lfmt -mavx2 -maes -lboost_program_options
 sltrsa-debug: sltrsa.cpp biguint.hpp ntalgo.hpp core.hpp core.cpp

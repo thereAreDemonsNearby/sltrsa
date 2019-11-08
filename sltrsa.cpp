@@ -39,6 +39,11 @@ void speedTest();
 
 int main(int argc, char* argv[])
 {
+    if (argc <= 1 || strcmp(argv[1], "help") == 0) {
+        fmt::print(stderr, "help informations(TODO)\n");
+        return 1;
+    }
+    
     namespace bpo = boost::program_options;
 
     bpo::options_description opts("all options");

@@ -1,3 +1,0 @@
-#include <fmt/format.h>
-#include "../ntalgo.hpp"
-#include "../MontMul_alter.hpp"
